@@ -1,0 +1,40 @@
+openapi: 3.0.3
+info:
+  title: Claude Orchestrator API
+  version: 0.1.0
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200': { description: OK }
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      responses:
+        '200': { description: OK }
+  /orchestrate/run:
+    post:
+      summary: Start orchestration
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                symbol: { type: string }
+                mode: { type: string, enum: [pubsub, http, hybrid] }
+      responses:
+        '202': { description: Accepted }
+        '409': { description: Halted due to daily target }
+  /orchestrate/stop:
+    post:
+      summary: Stop orchestration
+      responses:
+        '202': { description: Accepted }
+  /pnl/status:
+    get:
+      summary: Get current PnL status
+      responses:
+        '200': { description: OK }

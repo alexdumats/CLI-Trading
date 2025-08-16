@@ -1,0 +1,46 @@
+openapi: 3.0.3
+info:
+  title: Claude Notification Manager API
+  version: 0.1.0
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200': { description: OK }
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      responses:
+        '200': { description: OK }
+  /notify:
+    post:
+      summary: Send a notification
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type: { type: string }
+                severity: { type: string, enum: [info, warning, critical] }
+                message: { type: string }
+                context: { }
+      responses:
+        '202': { description: Accepted }
+  /notify/status/{id}:
+    get:
+      summary: Get notification status
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
+  /notify/recent:
+    get:
+      summary: Get recent notification events
+      responses:
+        '200': { description: OK }

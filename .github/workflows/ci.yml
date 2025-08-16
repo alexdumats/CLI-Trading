@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    env:
+      COMM_MODE: http
+      START_EQUITY: 1000
+      DAILY_TARGET_PCT: 1
+      PROFIT_PER_TRADE: 10
+      ADMIN_TOKEN: testtoken
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .env
+        run: |
+          cp .env.example .env
+          sed -i 's/^COMM_MODE=.*/COMM_MODE='"$COMM_MODE"'/' .env
+          sed -i 's/^START_EQUITY=.*/START_EQUITY='"$START_EQUITY"'/' .env
+          sed -i 's/^DAILY_TARGET_PCT=.*/DAILY_TARGET_PCT='"$DAILY_TARGET_PCT"'/' .env
+          sed -i 's/^PROFIT_PER_TRADE=.*/PROFIT_PER_TRADE='"$PROFIT_PER_TRADE"'/' .env
+          sed -i 's/^ADMIN_TOKEN=.*/ADMIN_TOKEN='"$ADMIN_TOKEN"'/' .env
+
+      - name: Build
+        run: docker compose build --no-cache
+
+      - name: Start stack
+        run: docker compose up -d
+
+      - name: Set failing Slack URL for tests
+        run: echo 'SLACK_WEBHOOK_URL=http://127.0.0.1:1' >> .env
+
+      - name: Run integration tests
+        run: docker compose run --rm tests
+
+      - name: Show logs (on failure)
+        if: failure()
+        run: |
+          docker compose ps
+          docker compose logs --no-color orchestrator risk-manager market-analyst trade-executor notification-manager
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

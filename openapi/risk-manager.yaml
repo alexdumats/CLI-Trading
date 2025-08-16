@@ -1,0 +1,45 @@
+openapi: 3.0.3
+info:
+  title: Claude Risk Manager API
+  version: 0.1.0
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200': { description: OK }
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      responses:
+        '200': { description: OK }
+  /risk/evaluate:
+    post:
+      summary: Evaluate risk of a request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                requestId: { type: string }
+                symbol: { type: string }
+                side: { type: string }
+                confidence: { type: number }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  reason: { type: string }
+                  riskScore: { type: number }
+  /risk/limits:
+    get:
+      summary: Get risk limits
+      responses:
+        '200': { description: OK }

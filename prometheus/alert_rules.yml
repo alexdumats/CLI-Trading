@@ -1,0 +1,29 @@
+groups:
+  - name: ops_rules
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Target down"
+          description: "One or more scrape targets are down."
+
+      - alert: HighStreamPending
+        expr: sum(stream_pending_count) > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High pending messages in Redis Streams"
+          description: "Pending entries across streams exceed 50 for 5m."
+
+      - alert: HighHttpLatencyP95
+        expr: histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m]))) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High p95 HTTP latency"
+          description: "p95 HTTP latency > 1s for 10m."

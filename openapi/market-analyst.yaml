@@ -1,0 +1,50 @@
+openapi: 3.0.3
+info:
+  title: Claude Market Analyst API
+  version: 0.1.0
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200': { description: OK }
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      responses:
+        '200': { description: OK }
+  /analysis/ingest:
+    post:
+      summary: Ingest market data
+      responses:
+        '202': { description: Accepted }
+  /analysis/signal:
+    get:
+      summary: Get trading signal
+      responses:
+        '200': { description: OK }
+  /analysis/analyze:
+    post:
+      summary: Analyze a symbol and produce a signal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                symbol: { type: string }
+                requestId: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requestId: { type: string }
+                  symbol: { type: string }
+                  side: { type: string, enum: [buy, sell] }
+                  confidence: { type: number }
+                  ts: { type: string }

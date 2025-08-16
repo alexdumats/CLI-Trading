@@ -1,0 +1,25 @@
+openapi: 3.0.3
+info:
+  title: Claude MCP Hub Controller API
+  version: 0.1.0
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200': { description: OK }
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      responses:
+        '200': { description: OK }
+  /mcp/status:
+    get:
+      summary: MCP status
+      responses:
+        '200': { description: OK }
+  /mcp/command:
+    post:
+      summary: Send MCP command
+      responses:
+        '202': { description: Accepted }

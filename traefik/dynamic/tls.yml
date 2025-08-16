@@ -1,0 +1,7 @@
+tls:
+  options:
+    mtls:
+      clientAuth:
+        caFiles:
+          - /etc/traefik/dynamic/mtls/ca.pem
+        clientAuthType: RequireAndVerifyClientCert

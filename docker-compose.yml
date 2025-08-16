@@ -1,0 +1,420 @@
+services:
+  traefik:
+    image: traefik:v2.11
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.le.acme.httpchallenge=true
+      - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
+      - --certificatesresolvers.le.acme.email=${LETSENCRYPT_EMAIL}
+      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+      - --api.dashboard=true
+      - --api.insecure=false
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-letsencrypt:/letsencrypt
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.traefik.rule=Host(`${TRAEFIK_DOMAIN}`)
+      - traefik.http.routers.traefik.entrypoints=websecure
+      - traefik.http.routers.traefik.tls.certresolver=le
+      - traefik.http.routers.traefik.service=api@internal
+      - traefik.http.middlewares.traefik-auth.basicauth.users=${TRAEFIK_BASIC_AUTH}
+      - traefik.http.middlewares.traefik-allow.ipwhitelist.sourcerange=${TRAEFIK_ALLOWED_CIDRS}
+      - traefik.http.routers.traefik.middlewares=traefik-auth,traefik-allow
+    networks: [public]
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  orchestrator:
+    build: ./agents/orchestrator
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /run:rw,noexec,nosuid,size=16m
+    environment:
+      - NODE_ENV=${NODE_ENV}
+      - SERVICE_NAME=Claude Orchestrator
+      - PORT=7001
+      - REDIS_URL=${REDIS_URL}
+      - COMM_MODE=${COMM_MODE}
+      - START_EQUITY=${START_EQUITY}
+      - DAILY_TARGET_PCT=${DAILY_TARGET_PCT}
+      - MARKET_ANALYST_URL=http://market-analyst:7003
+      - RISK_MANAGER_URL=http://risk-manager:7004
+      - TRADE_EXECUTOR_URL=http://trade-executor:7005
+      - NOTIFICATION_MANAGER_URL=http://notification-manager:7006
+      - ADMIN_TOKEN=${ADMIN_TOKEN}
+      - ADMIN_TOKEN_FILE=/run/secrets/admin_token
+      - POSTGRES_HOST=${POSTGRES_HOST}
+      - POSTGRES_PORT=${POSTGRES_PORT}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD_FILE=/run/secrets/postgres_password
+      - POSTGRES_DB=${POSTGRES_DB}
+    secrets:
+      - admin_token
+      - postgres_password
+    labels:
+      - traefik.enable=true
+      - traefik.http.middlewares.oauth2-forwardauth.forwardauth.address=http://oauth2-proxy:4180/oauth2/auth
+      - traefik.http.middlewares.oauth2-forwardauth.forwardauth.trustForwardHeader=true
+      - traefik.http.middlewares.oauth2-forwardauth.forwardauth.authResponseHeaders=X-Auth-Request-User,X-Auth-Request-Email
+      - traefik.http.middlewares.orch-rl.ratelimit.average=${ORCH_RL_AVG}
+      - traefik.http.middlewares.orch-rl.ratelimit.burst=${ORCH_RL_BURST}
+      - traefik.http.middlewares.orch-https-redirect.redirectscheme.scheme=https
+      - traefik.http.routers.orch.rule=Host(`${ORCH_DOMAIN}`) && PathPrefix(`/`)
+      - traefik.http.routers.orch.entrypoints=websecure
+      - traefik.http.routers.orch.tls.certresolver=le
+      - traefik.http.routers.orch.middlewares=oauth2-forwardauth,orch-rl
+      - traefik.http.routers.orch-http.rule=Host(`${ORCH_DOMAIN}`)
+      - traefik.http.routers.orch-http.entrypoints=web
+      - traefik.http.routers.orch-http.middlewares=orch-https-redirect
+      - traefik.http.routers.orch-admin.rule=Host(`${ORCH_DOMAIN}`) && PathPrefix(`/admin/`)
+      - traefik.http.routers.orch-admin.entrypoints=websecure
+      - traefik.http.routers.orch-admin.tls.certresolver=le
+      - traefik.http.routers.orch-admin.tls.options=mtls@file
+      - traefik.http.routers.orch-admin.middlewares=oauth2-forwardauth,orch-rl
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7001/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [backend, public]
+
+  portfolio-manager:
+    build: ./agents/portfolio-manager
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /run:rw,noexec,nosuid,size=16m
+    environment:
+      - NODE_ENV=${NODE_ENV}
+      - SERVICE_NAME=Claude Portfolio Manager
+      - PORT=7002
+      - REDIS_URL=${REDIS_URL}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [backend]
+
+  market-analyst:
+    build: ./agents/market-analyst
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /run:rw,noexec,nosuid,size=16m
+    environment:
+      - NODE_ENV=${NODE_ENV}
+      - SERVICE_NAME=Claude Market Analyst
+      - PORT=7003
+      - REDIS_URL=${REDIS_URL}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [backend]
+
+  risk-manager:
+    build: ./agents/risk-manager
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /run:rw,noexec,nosuid,size=16m
+    environment:
+      - NODE_ENV=${NODE_ENV}
+      - SERVICE_NAME=Claude Risk Manager
+      - PORT=7004
+      - REDIS_URL=${REDIS_URL}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [backend]
+
+  trade-executor:
+    build: ./agents/trade-executor
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /run:rw,noexec,nosuid,size=16m
+    environment:
+      - NODE_ENV=${NODE_ENV}
+      - SERVICE_NAME=Claude Trade Executor
+      - PORT=7005
+      - REDIS_URL=${REDIS_URL}
+      - PROFIT_PER_TRADE=${PROFIT_PER_TRADE}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [backend]
+
+  notification-manager:
+    build: ./agents/notification-manager
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /run:rw,noexec,nosuid,size=16m
+    environment:
+      - NODE_ENV=${NODE_ENV}
+      - SERVICE_NAME=Claude Notification Manager
+      - PORT=7006
+      - REDIS_URL=${REDIS_URL}
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+      - SLACK_WEBHOOK_URL_INFO=${SLACK_WEBHOOK_URL_INFO}
+      - SLACK_WEBHOOK_URL_WARNING=${SLACK_WEBHOOK_URL_WARNING}
+      - SLACK_WEBHOOK_URL_CRITICAL=${SLACK_WEBHOOK_URL_CRITICAL}
+      - GRAFANA_URL=${GRAFANA_URL}
+      - PROM_URL=${PROM_URL}
+      - ADMIN_TOKEN=${ADMIN_TOKEN}
+      - ADMIN_TOKEN_FILE=/run/secrets/admin_token
+    secrets:
+      - admin_token
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [backend]
+
+  slack-mcp:
+    image: ghcr.io/korotovsky/slack-mcp-server:latest
+    environment:
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
+      - SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET}
+      - SLACK_BOT_TOKEN_FILE=/run/secrets/slack_bot_token
+      - SLACK_SIGNING_SECRET_FILE=/run/secrets/slack_signing_secret
+    secrets:
+      - slack_bot_token
+      - slack_signing_secret
+    networks: [backend]
+    restart: unless-stopped
+
+  parameter-optimizer:
+    build: ./agents/parameter-optimizer
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /run:rw,noexec,nosuid,size=16m
+    environment:
+      - NODE_ENV=${NODE_ENV}
+      - SERVICE_NAME=Claude Parameter Optimizer
+      - PORT=7007
+      - REDIS_URL=${REDIS_URL}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [backend]
+
+  mcp-hub-controller:
+    build: ./agents/mcp-hub-controller
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /run:rw,noexec,nosuid,size=16m
+    environment:
+      - NODE_ENV=${NODE_ENV}
+      - SERVICE_NAME=Claude MCP Hub Controller
+      - PORT=7008
+      - REDIS_URL=${REDIS_URL}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [backend]
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD_FILE=/run/secrets/postgres_password
+      - POSTGRES_DB=${POSTGRES_DB}
+    secrets:
+      - postgres_password
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [backend]
+
+  migrator:
+    image: node:20-alpine
+    working_dir: /workspace
+    command: ["node", "scripts/migrate.js"]
+    environment:
+      - POSTGRES_HOST=${POSTGRES_HOST}
+      - POSTGRES_PORT=${POSTGRES_PORT}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - ./:/workspace:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [backend]
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
+    depends_on:
+      alertmanager:
+        condition: service_started
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.prom.rule=Host(`${PROM_DOMAIN}`)
+      - traefik.http.routers.prom.entrypoints=websecure
+      - traefik.http.routers.prom.tls.certresolver=le
+      - traefik.http.middlewares.prom-https-redirect.redirectscheme.scheme=https
+      - traefik.http.routers.prom-http.rule=Host(`${PROM_DOMAIN}`)
+      - traefik.http.routers.prom-http.entrypoints=web
+      - traefik.http.routers.prom-http.middlewares=prom-https-redirect
+      - traefik.http.middlewares.prom-auth.basicauth.users=${TRAEFIK_BASIC_AUTH}
+      - traefik.http.middlewares.prom-allow.ipwhitelist.sourcerange=${TRAEFIK_ALLOWED_CIDRS}
+      - traefik.http.routers.prom.middlewares=prom-auth,prom-allow
+    networks: [backend, public]
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml", "--storage.path=/alertmanager", "--config.expand-env=true"]
+    environment:
+      - ALERT_SLACK_WEBHOOK_URL=${ALERT_SLACK_WEBHOOK_URL}
+      - ALERT_SLACK_CHANNEL=${ALERT_SLACK_CHANNEL}
+    networks: [backend]
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.graf.rule=Host(`${GRAFANA_DOMAIN}`)
+      - traefik.http.routers.graf.entrypoints=websecure
+      - traefik.http.routers.graf.tls.certresolver=le
+      - traefik.http.middlewares.graf-https-redirect.redirectscheme.scheme=https
+      - traefik.http.routers.graf-http.rule=Host(`${GRAFANA_DOMAIN}`)
+      - traefik.http.routers.graf-http.entrypoints=web
+      - traefik.http.routers.graf-http.middlewares=graf-https-redirect
+      - traefik.http.middlewares.graf-auth.basicauth.users=${TRAEFIK_BASIC_AUTH}
+      - traefik.http.middlewares.graf-allow.ipwhitelist.sourcerange=${TRAEFIK_ALLOWED_CIDRS}
+      - traefik.http.routers.graf.middlewares=graf-auth,graf-allow
+    networks: [backend, public]
+
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
+    environment:
+      - OAUTH2_PROXY_PROVIDER=${OAUTH2_PROXY_PROVIDER}
+      # Client ID/Secret/Cookie Secret loaded from Docker secrets via load_secrets.sh
+      - OAUTH2_PROXY_EMAIL_DOMAINS=${OAUTH2_PROXY_EMAIL_DOMAINS}
+      - OAUTH2_PROXY_ALLOWED_EMAILS=${OAUTH2_PROXY_ALLOWED_EMAILS}
+      - OAUTH2_PROXY_REDIRECT_URL=${OAUTH2_PROXY_REDIRECT_URL}
+      - OAUTH2_PROXY_UPSTREAMS=static://200
+      - OAUTH2_PROXY_HTTP_ADDRESS=0.0.0.0:4180
+    command: ["/bin/sh", "-c", ". /etc/oauth2-proxy/load_secrets.sh"]
+    volumes:
+      - ./oauth2-proxy/load_secrets.sh:/etc/oauth2-proxy/load_secrets.sh:ro
+    secrets:
+      - oauth2_client_id
+      - oauth2_client_secret
+      - oauth2_cookie_secret
+    networks: [backend]
+
+  tests:
+    image: node:20-alpine
+    working_dir: /workspace
+    command: ["node", "tests/integration/run_all.js"]
+    environment:
+      - ORCH_URL=http://orchestrator:7001
+      - ADMIN_TOKEN=${ADMIN_TOKEN}
+    volumes:
+      - ./:/workspace:ro
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+    networks: [backend]
+
+networks:
+  backend:
+    driver: bridge
+  public:
+    driver: bridge
+
+volumes:
+  redis-data:
+  grafana-storage:
+  traefik-letsencrypt:
+
+secrets:
+  admin_token:
+    file: ./secrets/admin_token
+  postgres_password:
+    file: ./secrets/postgres_password
+  slack_bot_token:
+    file: ./secrets/slack_bot_token
+  slack_signing_secret:
+    file: ./secrets/slack_signing_secret
+  oauth2_client_id:
+    file: ./secrets/oauth2_client_id
+  oauth2_client_secret:
+    file: ./secrets/oauth2_client_secret
+  oauth2_cookie_secret:
+    file: ./secrets/oauth2_cookie_secret

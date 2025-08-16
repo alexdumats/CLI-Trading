@@ -1,0 +1,5 @@
+# Optional local override to mount mTLS CA for Traefik
+services:
+  traefik:
+    volumes:
+      - ./secrets/mtls_ca/ca.pem:/etc/traefik/dynamic/mtls/ca.pem:ro

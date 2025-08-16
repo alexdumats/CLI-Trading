@@ -1,0 +1,25 @@
+openapi: 3.0.3
+info:
+  title: Claude Parameter Optimizer API
+  version: 0.1.0
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200': { description: OK }
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      responses:
+        '200': { description: OK }
+  /optimize/run:
+    post:
+      summary: Run parameter optimization
+      responses:
+        '202': { description: Accepted }
+  /optimize/params:
+    get:
+      summary: Get optimized parameters
+      responses:
+        '200': { description: OK }

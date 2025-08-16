@@ -1,0 +1,52 @@
+openapi: 3.0.3
+info:
+  title: Claude Trade Executor API
+  version: 0.1.0
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200': { description: OK }
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      responses:
+        '200': { description: OK }
+  /trade/submit:
+    post:
+      summary: Submit a trade
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                orderId: { type: string }
+                symbol: { type: string }
+                side: { type: string }
+                qty: { type: number }
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orderId: { type: string }
+                  symbol: { type: string }
+                  side: { type: string }
+                  qty: { type: number }
+                  status: { type: string }
+  /trade/status/{id}:
+    get:
+      summary: Get trade status
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: OK }
