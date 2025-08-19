@@ -367,6 +367,53 @@ services:
     networks: [backend]
     restart: unless-stopped
 
+  rovo-dev-hub:
+    build: ./agents/rovo-dev-hub
+    read_only: true
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /run:rw,noexec,nosuid,size=16m
+    environment:
+      - NODE_ENV=${NODE_ENV}
+      - SERVICE_NAME=Rovo Dev Hub
+      - PORT=7010
+      - REDIS_URL=${REDIS_URL}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # Agent URLs for communication
+      - ORCHESTRATOR_URL=http://orchestrator:7001
+      - MARKET_ANALYST_URL=http://market-analyst:7003
+      - RISK_MANAGER_URL=http://risk-manager:7004
+      - TRADE_EXECUTOR_URL=http://trade-executor:7005
+      - NOTIFICATION_MANAGER_URL=http://notification-manager:7006
+      - PARAMETER_OPTIMIZER_URL=http://parameter-optimizer:7007
+      - MCP_HUB_CONTROLLER_URL=http://mcp-hub-controller:7008
+      - PORTFOLIO_MANAGER_URL=http://portfolio-manager:7002
+      - INTEGRATIONS_BROKER_URL=http://integrations-broker:7009
+    ports:
+      - '7010:7010'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:7010/health || exit 1']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          memory: 256M
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [backend, public]
+
   parameter-optimizer:
     build: ./agents/parameter-optimizer
     read_only: true
