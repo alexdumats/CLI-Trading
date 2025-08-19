@@ -368,7 +368,9 @@ services:
     restart: unless-stopped
 
   rovo-dev-hub:
-    build: ./agents/rovo-dev-hub
+    build:
+      context: .
+      dockerfile: ./agents/rovo-dev-hub/Dockerfile
     read_only: true
     restart: unless-stopped
     cap_drop:
