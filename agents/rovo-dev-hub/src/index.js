@@ -3,9 +3,9 @@ import Redis from 'ioredis';
 import client from 'prom-client';
 import axios from 'axios';
 import { WebSocketServer } from 'ws';
-import { createLogger } from '../../../common/logger.js';
-import { traceMiddleware, requestLoggerMiddleware } from '../../../common/trace.js';
-import { xaddJSON, startConsumer } from '../../../common/streams.js';
+import { createLogger } from '/app/common/logger.js';
+import { traceMiddleware, requestLoggerMiddleware } from '/app/common/trace.js';
+import { xaddJSON, startConsumer } from '/app/common/streams.js';
 
 const SERVICE_NAME = process.env.SERVICE_NAME || 'Rovo Dev Hub';
 const PORT = parseInt(process.env.PORT || '7010', 10);
