@@ -1,23 +1,37 @@
 groups:
   - name: ops_rules
     rules:
+      - alert: ParamThresholdChanged
+        expr: abs(delta(optimizer_active_min_confidence[15m])) > 0.05
+        for: 0m
+        labels:
+          severity: info
+        annotations:
+          summary: 'Optimizer parameter minConfidence changed'
+          description: 'Change in minConfidence > 0.05 in the last 15m. Validate recent approvals.'
+          runbook_url: 'https://github.com/your-org/your-repo/blob/main/docs/runbooks/param_threshold_changed.md'
+
+      # Generic target health
       - alert: ServiceDown
         expr: up == 0
         for: 2m
         labels:
           severity: warning
         annotations:
-          summary: "Target down"
-          description: "One or more scrape targets are down."
+          summary: 'Target down'
+          description: 'One or more scrape targets are down.'
+          runbook_url: 'https://github.com/your-org/your-repo/blob/main/docs/runbooks/service_down.md'
 
+      # Agents: HTTP latency, streams lag/pending
       - alert: HighStreamPending
         expr: sum(stream_pending_count) > 50
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "High pending messages in Redis Streams"
-          description: "Pending entries across streams exceed 50 for 5m."
+          summary: 'High pending messages in Redis Streams'
+          description: 'Pending entries across streams exceed 50 for 5m.'
+          runbook_url: 'https://github.com/your-org/your-repo/blob/main/docs/runbooks/high_stream_pending.md'
 
       - alert: HighHttpLatencyP95
         expr: histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m]))) > 1
@@ -25,5 +39,90 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "High p95 HTTP latency"
-          description: "p95 HTTP latency > 1s for 10m."
+          summary: 'High p95 HTTP latency'
+          description: 'p95 HTTP latency > 1s for 10m.'
+          runbook_url: 'https://github.com/your-org/your-repo/blob/main/docs/runbooks/high_http_latency_p95.md'
+
+  - name: redis_rules
+    rules:
+      - alert: RedisDown
+        expr: max(up{job="redis_exporter"}) == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Redis exporter down'
+          description: 'redis_exporter target is down for 2m.'
+          runbook_url: 'https://github.com/your-org/your-repo/blob/main/docs/runbooks/redis_down.md'
+
+      - alert: RedisHighMemory
+        expr: max(redis_memory_used_bytes) / max(redis_total_system_memory_bytes) > 0.85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Redis memory > 85%'
+          description: 'Redis memory usage exceeds 85% for 10m.'
+          runbook_url: 'https://github.com/your-org/your-repo/blob/main/docs/runbooks/redis_high_memory.md'
+
+      - alert: RedisEvictions
+        expr: increase(redis_evicted_keys_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Redis evicting keys'
+          description: 'Evicted keys observed in the last 10m.'
+          runbook_url: 'https://github.com/your-org/your-repo/blob/main/docs/runbooks/redis_evictions.md'
+
+      - alert: RedisOpsSpike
+        expr: rate(redis_commands_processed_total[5m]) > 5000
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: 'High Redis ops/sec'
+          description: 'Redis ops/sec over 5000 for 10m. Tune threshold to environment.'
+          runbook_url: 'https://github.com/your-org/your-repo/blob/main/docs/runbooks/redis_ops_spike.md'
+
+  - name: postgres_rules
+    rules:
+      - alert: PostgresExporterDown
+        expr: max(up{job="postgres_exporter"}) == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Postgres exporter down'
+          description: 'postgres_exporter target is down for 2m.'
+          runbook_url: 'https://github.com/your-org/your-repo/blob/main/docs/runbooks/postgres_exporter_down.md'
+
+      - alert: PostgresDown
+        expr: max(pg_up) == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Postgres down'
+          description: 'pg_up reports 0 for 2 minutes.'
+          runbook_url: 'https://github.com/your-org/your-repo/blob/main/docs/runbooks/postgres_down.md'
+
+      - alert: PostgresHighConnections
+        expr: sum(pg_stat_database_numbackends) > 0.8 * max(pg_settings_max_connections)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Postgres connections high'
+          description: 'Connections > 80% of max for 10m.'
+          runbook_url: 'https://github.com/your-org/your-repo/blob/main/docs/runbooks/postgres_high_connections.md'
+
+      - alert: PostgresLowCacheHit
+        expr: (sum(rate(pg_stat_database_blks_hit_total[5m])) / (sum(rate(pg_stat_database_blks_hit_total[5m])) + sum(rate(pg_stat_database_blks_read_total[5m])))) < 0.90
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Postgres cache hit ratio low'
+          description: 'Cache hit ratio < 90% for 15m.'
+          runbook_url: 'https://github.com/your-org/your-repo/blob/main/docs/runbooks/postgres_low_cache_hit.md'

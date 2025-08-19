@@ -27,7 +27,9 @@ const ORCH_URL = process.env.ORCH_URL || 'http://localhost:7001';
 const NOTIF_URL = process.env.NOTIF_URL || 'http://localhost:7006';
 let ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
 if (!ADMIN_TOKEN && process.env.ADMIN_TOKEN_FILE) {
-  try { ADMIN_TOKEN = fs.readFileSync(process.env.ADMIN_TOKEN_FILE, 'utf8').trim(); } catch {}
+  try {
+    ADMIN_TOKEN = fs.readFileSync(process.env.ADMIN_TOKEN_FILE, 'utf8').trim();
+  } catch {}
 }
 
 function parseArgs(list) {
@@ -77,6 +79,9 @@ async function main() {
         requireAdmin();
         await orchUnhalt();
         return;
+      case 'opt:params':
+        await optParams();
+        return;
       default:
         console.error('Unknown command:', cmd);
         printHelp();
@@ -117,7 +122,7 @@ async function streamsDlqRequeue({ stream, id }) {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Admin-Token': ADMIN_TOKEN },
-    body: JSON.stringify({ dlqStream: stream, id })
+    body: JSON.stringify({ dlqStream: stream, id }),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   console.log(JSON.stringify(await res.json(), null, 2));
@@ -130,7 +135,7 @@ async function notifyAck({ traceId, requestId }) {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Admin-Token': ADMIN_TOKEN },
-    body: JSON.stringify(traceId ? { traceId } : { requestId })
+    body: JSON.stringify(traceId ? { traceId } : { requestId }),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   console.log(JSON.stringify(await res.json(), null, 2));
@@ -148,7 +153,7 @@ async function orchHalt({ reason = 'manual' }) {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Admin-Token': ADMIN_TOKEN },
-    body: JSON.stringify({ reason })
+    body: JSON.stringify({ reason }),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   console.log(JSON.stringify(await res.json(), null, 2));
@@ -158,8 +163,15 @@ async function orchUnhalt() {
   const url = `${ORCH_URL}/admin/orchestrate/unhalt`;
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Admin-Token': ADMIN_TOKEN }
+    headers: { 'Content-Type': 'application/json', 'X-Admin-Token': ADMIN_TOKEN },
   });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  console.log(JSON.stringify(await res.json(), null, 2));
+}
+
+async function optParams() {
+  const url = (process.env.OPT_URL || 'http://parameter-optimizer:7007') + '/optimize/params';
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   console.log(JSON.stringify(await res.json(), null, 2));
 }

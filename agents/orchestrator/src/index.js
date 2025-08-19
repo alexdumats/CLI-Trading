@@ -6,13 +6,22 @@ import axios from 'axios';
 import fs from 'node:fs';
 import { createLogger } from '../../../common/logger.js';
 import { traceMiddleware, requestLoggerMiddleware } from '../../../common/trace.js';
-import { initDayIfNeeded, getStatus as getPnlStatus, incrementPnl, isHalted, setHalted, resetDay } from '../../../common/pnl.js';
+import {
+  initDayIfNeeded,
+  getStatus as getPnlStatus,
+  incrementPnl,
+  isHalted,
+  setHalted,
+  resetDay,
+} from '../../../common/pnl.js';
 import { createPgPool, insertAudit, upsertPnl } from '../../../common/db.js';
 import { xaddJSON, startConsumer, startPendingMonitor } from '../../../common/streams.js';
 
 // Allow ADMIN_TOKEN to be supplied via file for secrets handling
 if (process.env.ADMIN_TOKEN_FILE && !process.env.ADMIN_TOKEN) {
-  try { process.env.ADMIN_TOKEN = fs.readFileSync(process.env.ADMIN_TOKEN_FILE, 'utf8').trim(); } catch {}
+  try {
+    process.env.ADMIN_TOKEN = fs.readFileSync(process.env.ADMIN_TOKEN_FILE, 'utf8').trim();
+  } catch {}
 }
 
 const SERVICE_NAME = process.env.SERVICE_NAME || 'Claude Orchestrator';
@@ -28,7 +37,8 @@ const STREAM_MAX_FAILURES = parseInt(process.env.STREAM_MAX_FAILURES || '5', 10)
 const MARKET_ANALYST_URL = process.env.MARKET_ANALYST_URL || 'http://market-analyst:7003';
 const RISK_MANAGER_URL = process.env.RISK_MANAGER_URL || 'http://risk-manager:7004';
 const TRADE_EXECUTOR_URL = process.env.TRADE_EXECUTOR_URL || 'http://trade-executor:7005';
-const NOTIFICATION_MANAGER_URL = process.env.NOTIFICATION_MANAGER_URL || 'http://notification-manager:7006';
+const NOTIFICATION_MANAGER_URL =
+  process.env.NOTIFICATION_MANAGER_URL || 'http://notification-manager:7006';
 
 const http = axios.create({ timeout: 5000, validateStatus: () => true });
 
@@ -53,7 +63,7 @@ const CHANNELS = {
   RISK_RESPONSES: 'risk.responses',
   EXEC_ORDERS: 'exec.orders',
   EXEC_STATUS: 'exec.status',
-  NOTIFY_EVENTS: 'notify.events'
+  NOTIFY_EVENTS: 'notify.events',
 };
 
 // In-memory tracking of requests
@@ -73,12 +83,15 @@ const httpRequestDuration = new client.Histogram({
   name: 'http_request_duration_seconds',
   help: 'Duration of HTTP requests in seconds',
   labelNames: ['method', 'path', 'status'],
-  buckets: [0.05, 0.1, 0.3, 0.5, 1, 2, 5]
+  buckets: [0.05, 0.1, 0.3, 0.5, 1, 2, 5],
 });
 register.registerMetric(httpRequestDuration);
-const streamPendingGauge = new client.Gauge({ name: 'stream_pending_count', help: 'Pending messages in Redis Streams', labelNames: ['stream','group'] });
+const streamPendingGauge = new client.Gauge({
+  name: 'stream_pending_count',
+  help: 'Pending messages in Redis Streams',
+  labelNames: ['stream', 'group'],
+});
 register.registerMetric(streamPendingGauge);
-
 
 // Timing middleware
 app.use((req, res, next) => {
@@ -92,7 +105,9 @@ app.get('/health', async (req, res) => {
   let redisStatus = 'unknown';
   let dbStatus = 'unknown';
   try {
-    await pub.ping(); await sub.ping(); await kv.ping();
+    await pub.ping();
+    await sub.ping();
+    await kv.ping();
     await initDayIfNeeded(kv, { startEquity: START_EQUITY, dailyTargetPct: DAILY_TARGET_PCT });
     redisStatus = 'ok';
   } catch {
@@ -105,13 +120,49 @@ app.get('/health', async (req, res) => {
     dbStatus = 'error';
   }
   const pnl = await getPnlStatus(kv);
-  res.json({ status: 'ok', service: SERVICE_NAME, redis: redisStatus, db: dbStatus, pnl, uptime: process.uptime(), ts: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    service: SERVICE_NAME,
+    redis: redisStatus,
+    db: dbStatus,
+    pnl,
+    uptime: process.uptime(),
+    ts: new Date().toISOString(),
+  });
 });
 
 // Metrics
 app.get('/metrics', async (req, res) => {
   res.set('Content-Type', register.contentType);
   res.end(await register.metrics());
+});
+
+// Standardized status
+app.get('/status', async (req, res) => {
+  let redisStatus = 'unknown';
+  let dbStatus = 'unknown';
+  try {
+    await pub.ping();
+    await sub.ping();
+    await kv.ping();
+    redisStatus = 'ok';
+  } catch {
+    redisStatus = 'error';
+  }
+  try {
+    await pgPool.query('select 1');
+    dbStatus = 'ok';
+  } catch {
+    dbStatus = 'error';
+  }
+  res.json({
+    status: 'ok',
+    service: SERVICE_NAME,
+    role: 'orchestrator',
+    version: process.env.npm_package_version || '0.0.0',
+    uptime: process.uptime(),
+    deps: { redis: redisStatus, db: dbStatus },
+  });
 });
 
 // PnL endpoints
@@ -130,10 +181,168 @@ app.post('/admin/pnl/reset', async (req, res) => {
   res.json({ ok: true, pnl });
 });
 
+// Chat endpoint (human-in-the-loop)
+app.post('/chat', async (req, res) => {
+  try {
+    const { input = '', intent = '', args = {}, adminToken } = req.body || {};
+    const lower = String(intent || input).toLowerCase();
+    const tokenHdr = req.header('x-admin-token') || adminToken || '';
+    const requireAdmin = () => {
+      if (!process.env.ADMIN_TOKEN || tokenHdr !== process.env.ADMIN_TOKEN) {
+        res.status(401).json({
+          error: 'unauthorized',
+          note: 'admin intent requires X-Admin-Token or adminToken in body',
+        });
+        return false;
+      }
+      return true;
+    };
+
+    const reply = (text, data) => res.json({ ok: true, text, data });
+
+    // status (aggregate)
+    if (lower.includes('status')) {
+      const targets = [
+        { name: 'orchestrator', url: `http://localhost:${PORT}` },
+        { name: 'market-analyst', url: MARKET_ANALYST_URL },
+        { name: 'risk-manager', url: RISK_MANAGER_URL },
+        { name: 'trade-executor', url: TRADE_EXECUTOR_URL },
+        { name: 'notification-manager', url: NOTIFICATION_MANAGER_URL },
+      ];
+      const results = {};
+      await Promise.all(
+        targets.map(async (t) => {
+          try {
+            const r = await fetch(`${t.url}/status`, { method: 'GET' });
+            results[t.name] = { status: r.status, body: await r.json().catch(() => null) };
+          } catch (e) {
+            results[t.name] = { error: String(e?.message || e) };
+          }
+        })
+      );
+      return reply('Service status summary', results);
+    }
+
+    // halt
+    if (lower.includes('halt') && !lower.includes('unhalt')) {
+      if (!requireAdmin()) return;
+      await setHalted(kv, true);
+      const reason = args?.reason || 'manual';
+      await xaddJSON(pub, CHANNELS.ORCH_CMDS, {
+        type: 'halt',
+        reason,
+        ts: new Date().toISOString(),
+        traceId: req.ids?.traceId,
+      });
+      await xaddJSON(pub, CHANNELS.NOTIFY_EVENTS, {
+        type: 'manual_halt',
+        severity: 'warning',
+        message: 'Orchestrator manually halted (chat)',
+        context: { reason },
+        traceId: req.ids?.traceId,
+        ts: new Date().toISOString(),
+      });
+      return reply('Orchestration halted', { reason });
+    }
+
+    // unhalt
+    if (lower.includes('unhalt') || lower.includes('resume')) {
+      if (!requireAdmin()) return;
+      await setHalted(kv, false);
+      await xaddJSON(pub, CHANNELS.NOTIFY_EVENTS, {
+        type: 'manual_unhalt',
+        severity: 'info',
+        message: 'Orchestrator manually unhalted (chat)',
+        traceId: req.ids?.traceId,
+        ts: new Date().toISOString(),
+      });
+      return reply('Orchestration resumed');
+    }
+
+    // run
+    if (lower.includes('run') || lower.includes('trade')) {
+      const symbol = args?.symbol || (/\b[a-z]{3,5}-[a-z]{3,5}\b/i.exec(input)?.[0] ?? 'BTC-USD');
+      const mode = (
+        args?.mode ||
+        (lower.includes('http') ? 'http' : lower.includes('pubsub') ? 'pubsub' : COMM_MODE)
+      ).toLowerCase();
+      try {
+        const resp = await fetch(`http://localhost:${PORT}/orchestrate/run`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Request-Id': req.ids?.requestId || '',
+            'X-Trace-Id': req.ids?.traceId || '',
+          },
+          body: JSON.stringify({ symbol, mode }),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (resp.status >= 300)
+          return res.status(resp.status).json({ error: 'run_failed', detail: data });
+        return reply(`Run accepted (${mode}) for ${symbol}`, data);
+      } catch (e) {
+        return res.status(500).json({ error: 'run_error', detail: String(e?.message || e) });
+      }
+    }
+
+    // dlq list
+    if (lower.includes('dlq') && lower.includes('list')) {
+      if (!requireAdmin()) return;
+      const stream = args?.dlqStream || 'notify.events.dlq';
+      try {
+        const entries = await sub.xrange(stream, '-', '+', 'COUNT', 10);
+        const formatted = entries.map(([id, fields]) => {
+          const idx = fields.findIndex((v, i) => i % 2 === 0 && v === 'data');
+          const jsonStr = idx >= 0 ? fields[idx + 1] : null;
+          return { id, payload: jsonStr ? JSON.parse(jsonStr) : null };
+        });
+        return reply(`DLQ ${stream} entries (up to 10)`, { stream, entries: formatted });
+      } catch (e) {
+        return res.status(500).json({ error: 'dlq_list_failed', detail: String(e?.message || e) });
+      }
+    }
+
+    // dlq requeue
+    if (lower.includes('dlq') && (lower.includes('requeue') || lower.includes('re-enqueue'))) {
+      if (!requireAdmin()) return;
+      const dlqStream = args?.dlqStream || 'notify.events.dlq';
+      const id = args?.id || /(\d+-\d+)/.exec(input)?.[1];
+      if (!id) return res.status(400).json({ error: 'missing_id' });
+      try {
+        const entries = await sub.xrange(dlqStream, id, id);
+        if (!entries || !entries.length) return res.status(404).json({ error: 'not_found' });
+        const fields = entries[0][1];
+        const idx = fields.findIndex((v, i) => i % 2 === 0 && v === 'data');
+        const jsonStr = idx >= 0 ? fields[idx + 1] : null;
+        const payload = jsonStr ? JSON.parse(jsonStr) : null;
+        const originalStream = payload?.originalStream;
+        const originalPayload = payload?.payload;
+        if (!originalStream || !originalPayload)
+          return res.status(400).json({ error: 'invalid_dlq_format' });
+        await xaddJSON(sub, originalStream, originalPayload);
+        await sub.xdel(dlqStream, id);
+        return reply('Requeued DLQ entry', { dlqStream, id, originalStream });
+      } catch (e) {
+        return res
+          .status(500)
+          .json({ error: 'dlq_requeue_failed', detail: String(e?.message || e) });
+      }
+    }
+
+    // fallback help
+    return reply(
+      'Supported intents: status | halt | unhalt | run <SYMBOL> [http|pubsub] | dlq list | dlq requeue <ID>'
+    );
+  } catch (e) {
+    return res.status(500).json({ error: 'chat_failed', detail: String(e?.message || e) });
+  }
+});
+
 // Admin Streams Ops
 app.get('/admin/streams/pending', async (req, res) => {
   const token = req.header('x-admin-token') || '';
-  if (!process.env.ADMIN_TOKEN || token !== process.env.ADMIN_TOKEN) return res.status(401).json({ error: 'unauthorized' });
+  if (!process.env.ADMIN_TOKEN || token !== process.env.ADMIN_TOKEN)
+    return res.status(401).json({ error: 'unauthorized' });
   const { stream, group } = req.query;
   if (!stream || !group) return res.status(400).json({ error: 'missing_stream_or_group' });
   try {
@@ -146,7 +355,8 @@ app.get('/admin/streams/pending', async (req, res) => {
 
 app.get('/admin/streams/dlq', async (req, res) => {
   const token = req.header('x-admin-token') || '';
-  if (!process.env.ADMIN_TOKEN || token !== process.env.ADMIN_TOKEN) return res.status(401).json({ error: 'unauthorized' });
+  if (!process.env.ADMIN_TOKEN || token !== process.env.ADMIN_TOKEN)
+    return res.status(401).json({ error: 'unauthorized' });
   const { stream, start = '-', end = '+', count = '50' } = req.query;
   if (!stream) return res.status(400).json({ error: 'missing_stream' });
   try {
@@ -164,7 +374,8 @@ app.get('/admin/streams/dlq', async (req, res) => {
 
 app.post('/admin/streams/dlq/requeue', async (req, res) => {
   const token = req.header('x-admin-token') || '';
-  if (!process.env.ADMIN_TOKEN || token !== process.env.ADMIN_TOKEN) return res.status(401).json({ error: 'unauthorized' });
+  if (!process.env.ADMIN_TOKEN || token !== process.env.ADMIN_TOKEN)
+    return res.status(401).json({ error: 'unauthorized' });
   const { dlqStream, id } = req.body || {};
   if (!dlqStream || !id) return res.status(400).json({ error: 'missing_dlq_or_id' });
   try {
@@ -176,7 +387,8 @@ app.post('/admin/streams/dlq/requeue', async (req, res) => {
     if (!jsonStr) return res.status(400).json({ error: 'invalid_payload' });
     const payload = JSON.parse(jsonStr);
     const { originalStream, payload: originalPayload } = payload || {};
-    if (!originalStream || !originalPayload) return res.status(400).json({ error: 'invalid_dlq_format' });
+    if (!originalStream || !originalPayload)
+      return res.status(400).json({ error: 'invalid_dlq_format' });
     await xaddJSON(sub, originalStream, originalPayload);
     await sub.xdel(dlqStream, id);
     return res.json({ ok: true });
@@ -189,19 +401,39 @@ app.post('/admin/streams/dlq/requeue', async (req, res) => {
 // Admin: manual halt/unhalt
 app.post('/admin/orchestrate/halt', async (req, res) => {
   const token = req.header('x-admin-token') || '';
-  if (!process.env.ADMIN_TOKEN || token !== process.env.ADMIN_TOKEN) return res.status(401).json({ error: 'unauthorized' });
+  if (!process.env.ADMIN_TOKEN || token !== process.env.ADMIN_TOKEN)
+    return res.status(401).json({ error: 'unauthorized' });
   await setHalted(kv, true);
   const reason = (req.body && req.body.reason) || 'manual';
-  await xaddJSON(pub, CHANNELS.ORCH_CMDS, { type: 'halt', reason, ts: new Date().toISOString(), traceId: req.ids?.traceId });
-  await xaddJSON(pub, CHANNELS.NOTIFY_EVENTS, { type: 'manual_halt', severity: 'warning', message: 'Orchestrator manually halted', context: { reason }, traceId: req.ids?.traceId, ts: new Date().toISOString() });
+  await xaddJSON(pub, CHANNELS.ORCH_CMDS, {
+    type: 'halt',
+    reason,
+    ts: new Date().toISOString(),
+    traceId: req.ids?.traceId,
+  });
+  await xaddJSON(pub, CHANNELS.NOTIFY_EVENTS, {
+    type: 'manual_halt',
+    severity: 'warning',
+    message: 'Orchestrator manually halted',
+    context: { reason },
+    traceId: req.ids?.traceId,
+    ts: new Date().toISOString(),
+  });
   res.json({ ok: true, halted: true });
 });
 
 app.post('/admin/orchestrate/unhalt', async (req, res) => {
   const token = req.header('x-admin-token') || '';
-  if (!process.env.ADMIN_TOKEN || token !== process.env.ADMIN_TOKEN) return res.status(401).json({ error: 'unauthorized' });
+  if (!process.env.ADMIN_TOKEN || token !== process.env.ADMIN_TOKEN)
+    return res.status(401).json({ error: 'unauthorized' });
   await setHalted(kv, false);
-  await xaddJSON(pub, CHANNELS.NOTIFY_EVENTS, { type: 'manual_unhalt', severity: 'info', message: 'Orchestrator manually unhalted', traceId: req.ids?.traceId, ts: new Date().toISOString() });
+  await xaddJSON(pub, CHANNELS.NOTIFY_EVENTS, {
+    type: 'manual_unhalt',
+    severity: 'info',
+    message: 'Orchestrator manually unhalted',
+    traceId: req.ids?.traceId,
+    ts: new Date().toISOString(),
+  });
   res.json({ ok: true, halted: false });
 });
 
@@ -218,17 +450,36 @@ app.post('/orchestrate/run', async (req, res) => {
   const traceId = req.ids?.traceId || crypto.randomUUID();
 
   // audit accepted run request
-  try { await insertAudit(pgPool, { type: 'orchestrate_run', severity: 'info', payload: { symbol, mode }, requestId, traceId }); } catch {}
+  try {
+    await insertAudit(pgPool, {
+      type: 'orchestrate_run',
+      severity: 'info',
+      payload: { symbol, mode },
+      requestId,
+      traceId,
+    });
+  } catch {}
   if (mode === 'http' || mode === 'hybrid') {
     // HTTP pipeline: analyst -> risk -> exec
     try {
-      const analyzeResp = await http.post(`${MARKET_ANALYST_URL}/analysis/analyze`, { symbol, requestId }, { headers: { 'X-Request-Id': requestId, 'X-Trace-Id': traceId } });
+      const analyzeResp = await http.post(
+        `${MARKET_ANALYST_URL}/analysis/analyze`,
+        { symbol, requestId },
+        { headers: { 'X-Request-Id': requestId, 'X-Trace-Id': traceId } }
+      );
       if (analyzeResp.status >= 300) throw new Error(`analyze status ${analyzeResp.status}`);
       const signal = analyzeResp.data || {};
 
-      const riskResp = await http.post(`${RISK_MANAGER_URL}/risk/evaluate`, {
-        requestId, symbol, side: signal.side || 'buy', confidence: signal.confidence ?? 0
-      }, { headers: { 'X-Request-Id': requestId, 'X-Trace-Id': traceId } });
+      const riskResp = await http.post(
+        `${RISK_MANAGER_URL}/risk/evaluate`,
+        {
+          requestId,
+          symbol,
+          side: signal.side || 'buy',
+          confidence: signal.confidence ?? 0,
+        },
+        { headers: { 'X-Request-Id': requestId, 'X-Trace-Id': traceId } }
+      );
       if (riskResp.status >= 300) throw new Error(`risk status ${riskResp.status}`);
       const risk = riskResp.data || {};
 
@@ -239,21 +490,60 @@ app.post('/orchestrate/run', async (req, res) => {
           return res.status(409).json({ error: 'halted', reason: 'daily_target_reached', pnl });
         }
         const order = { orderId: requestId, symbol, side: signal.side || 'buy', qty: 1 };
-        try { await insertAudit(pgPool, { type: 'order_submitted', severity: 'info', payload: order, requestId, traceId }); } catch {}
-        const execResp = await http.post(`${TRADE_EXECUTOR_URL}/trade/submit`, order, { headers: { 'X-Request-Id': requestId, 'X-Trace-Id': traceId } });
+        try {
+          await insertAudit(pgPool, {
+            type: 'order_submitted',
+            severity: 'info',
+            payload: order,
+            requestId,
+            traceId,
+          });
+        } catch {}
+        const execResp = await http.post(`${TRADE_EXECUTOR_URL}/trade/submit`, order, {
+          headers: { 'X-Request-Id': requestId, 'X-Trace-Id': traceId },
+        });
         if (execResp.status >= 300) throw new Error(`exec status ${execResp.status}`);
         const trade = execResp.data || {};
-        return res.status(202).json({ status: 'accepted', mode: 'http', requestId, signal, risk, trade });
+        return res
+          .status(202)
+          .json({ status: 'accepted', mode: 'http', requestId, signal, risk, trade });
       } else {
         // notify on rejection
-        await http.post(`${NOTIFICATION_MANAGER_URL}/notify`, {
-          type: 'risk_rejected', severity: 'info', message: 'Trade rejected by risk', context: { requestId, symbol, reason: risk.reason }
-        }, { headers: { 'X-Request-Id': requestId, 'X-Trace-Id': traceId } }).catch(() => {});
-        try { await insertAudit(pgPool, { type: 'risk_rejected', severity: 'warning', payload: { reason: risk.reason, symbol }, requestId, traceId }); } catch {}
-        return res.status(202).json({ status: 'rejected', mode: 'http', requestId, reason: risk.reason || 'risk' });
+        await http
+          .post(
+            `${NOTIFICATION_MANAGER_URL}/notify`,
+            {
+              type: 'risk_rejected',
+              severity: 'info',
+              message: 'Trade rejected by risk',
+              context: { requestId, symbol, reason: risk.reason },
+            },
+            { headers: { 'X-Request-Id': requestId, 'X-Trace-Id': traceId } }
+          )
+          .catch(() => {});
+        try {
+          await insertAudit(pgPool, {
+            type: 'risk_rejected',
+            severity: 'warning',
+            payload: { reason: risk.reason, symbol },
+            requestId,
+            traceId,
+          });
+        } catch {}
+        return res
+          .status(202)
+          .json({ status: 'rejected', mode: 'http', requestId, reason: risk.reason || 'risk' });
       }
     } catch (e) {
-      try { await insertAudit(pgPool, { type: 'http_pipeline_error', severity: 'error', payload: { error: String(e.message || e) }, requestId, traceId }); } catch {}
+      try {
+        await insertAudit(pgPool, {
+          type: 'http_pipeline_error',
+          severity: 'error',
+          payload: { error: String(e.message || e) },
+          requestId,
+          traceId,
+        });
+      } catch {}
       log.error('http_pipeline_error', { error: String(e.message || e), requestId, traceId });
       return res.status(502).json({ error: 'pipeline_failed', detail: String(e.message || e) });
     }
@@ -261,7 +551,9 @@ app.post('/orchestrate/run', async (req, res) => {
     // Pub/Sub pipeline
     const cmd = { type: 'analyze', requestId, symbol, traceId, ts: new Date().toISOString() };
     await xaddJSON(pub, CHANNELS.ORCH_CMDS, cmd);
-    return res.status(202).json({ status: 'accepted', mode: 'pubsub', action: 'run', requestId, symbol });
+    return res
+      .status(202)
+      .json({ status: 'accepted', mode: 'pubsub', action: 'run', requestId, symbol });
   }
 });
 
@@ -271,6 +563,42 @@ app.post('/orchestrate/stop', async (req, res) => {
   res.status(202).json({ status: 'accepted', action: 'stop' });
 });
 
+// Standardized aliases
+app.post('/execute', async (req, res) => {
+  // Alias to /orchestrate/run with HTTP mode
+  req.body = { ...(req.body || {}), mode: 'http' };
+  // Delegate by calling the handler function directly is messy; re-run core logic quickly
+  // Easiest: proxy forward internally
+  try {
+    const r = await http.post(
+      `${MARKET_ANALYST_URL}/analysis/analyze`,
+      { symbol: (req.body && req.body.symbol) || 'BTC-USD', requestId: req.ids?.requestId },
+      { headers: { 'X-Request-Id': req.ids?.requestId, 'X-Trace-Id': req.ids?.traceId } }
+    );
+    if (r.status >= 300) throw new Error(`analyze status ${r.status}`);
+  } catch (e) {
+    // If dependency not up, just fallback to invoking the existing route
+  }
+  // Fallback: call the existing route logic by issuing an HTTP request to self
+  try {
+    const resp = await fetch(`http://localhost:${PORT}/orchestrate/run`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Request-Id': req.ids?.requestId || '',
+        'X-Trace-Id': req.ids?.traceId || '',
+      },
+      body: JSON.stringify({ ...req.body, mode: 'http' }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    return res.status(resp.status).json(data);
+  } catch (e) {
+    return res.status(500).json({ error: 'execute_failed', detail: String(e?.message || e) });
+  }
+});
+
+app.post('/optimize', (req, res) => res.status(501).json({ error: 'not_implemented' }));
+
 // Subscriptions: handle signals -> risk -> exec (Streams)
 await (async () => {
   const DLQ = {
@@ -279,53 +607,187 @@ await (async () => {
     EXEC_STATUS: `${CHANNELS.EXEC_STATUS}.dlq`,
   };
   // Pending monitors
-  startPendingMonitor({ redis: sub, stream: CHANNELS.ANALYSIS_SIGNALS, group: 'orchestrator', onCount: (c)=> streamPendingGauge.set({stream: CHANNELS.ANALYSIS_SIGNALS, group: 'orchestrator'}, c) });
-  startPendingMonitor({ redis: sub, stream: CHANNELS.RISK_RESPONSES, group: 'orchestrator', onCount: (c)=> streamPendingGauge.set({stream: CHANNELS.RISK_RESPONSES, group: 'orchestrator'}, c) });
-  startPendingMonitor({ redis: sub, stream: CHANNELS.EXEC_STATUS, group: 'orchestrator', onCount: (c)=> streamPendingGauge.set({stream: CHANNELS.EXEC_STATUS, group: 'orchestrator'}, c) });
-  const stopSig = startConsumer({ redis: sub, stream: CHANNELS.ANALYSIS_SIGNALS, group: 'orchestrator', logger, idempotency: { redis: kv, keyFn: (p)=>p.requestId, ttlSeconds: STREAM_IDEMP_TTL_SECONDS }, dlqStream: DLQ.ANALYSIS_SIGNALS, maxFailures: STREAM_MAX_FAILURES, handler: async ({ id, payload: msg }) => {
+  startPendingMonitor({
+    redis: sub,
+    stream: CHANNELS.ANALYSIS_SIGNALS,
+    group: 'orchestrator',
+    onCount: (c) =>
+      streamPendingGauge.set({ stream: CHANNELS.ANALYSIS_SIGNALS, group: 'orchestrator' }, c),
+  });
+  startPendingMonitor({
+    redis: sub,
+    stream: CHANNELS.RISK_RESPONSES,
+    group: 'orchestrator',
+    onCount: (c) =>
+      streamPendingGauge.set({ stream: CHANNELS.RISK_RESPONSES, group: 'orchestrator' }, c),
+  });
+  startPendingMonitor({
+    redis: sub,
+    stream: CHANNELS.EXEC_STATUS,
+    group: 'orchestrator',
+    onCount: (c) =>
+      streamPendingGauge.set({ stream: CHANNELS.EXEC_STATUS, group: 'orchestrator' }, c),
+  });
+  const stopSig = startConsumer({
+    redis: sub,
+    stream: CHANNELS.ANALYSIS_SIGNALS,
+    group: 'orchestrator',
+    logger,
+    idempotency: { redis: kv, keyFn: (p) => p.requestId, ttlSeconds: STREAM_IDEMP_TTL_SECONDS },
+    dlqStream: DLQ.ANALYSIS_SIGNALS,
+    maxFailures: STREAM_MAX_FAILURES,
+    handler: async ({ id, payload: msg }) => {
       // ANALYSIS_SIGNALS
       try {
         const requestId = msg.id || msg.requestId || `${Date.now()}-${Math.random()}`;
         pending.set(requestId, { symbol: msg.symbol, side: msg.side, confidence: msg.confidence });
-        const riskReq = { requestId, symbol: msg.symbol, side: msg.side, confidence: msg.confidence, traceId: msg.traceId, ts: new Date().toISOString() };
+        const riskReq = {
+          requestId,
+          symbol: msg.symbol,
+          side: msg.side,
+          confidence: msg.confidence,
+          traceId: msg.traceId,
+          ts: new Date().toISOString(),
+        };
         await xaddJSON(pub, CHANNELS.RISK_REQUESTS, riskReq);
-      } catch (e) { logger.error('analysis_signal_handler_error', { error: String(e?.message || e) }); }
-    } });
+      } catch (e) {
+        logger.error('analysis_signal_handler_error', { error: String(e?.message || e) });
+      }
+    },
+  });
 
-  const stopRisk = startConsumer({ redis: sub, stream: CHANNELS.RISK_RESPONSES, group: 'orchestrator', logger, idempotency: { redis: kv, keyFn: (p)=>p.requestId, ttlSeconds: STREAM_IDEMP_TTL_SECONDS }, dlqStream: DLQ.RISK_RESPONSES, maxFailures: STREAM_MAX_FAILURES, handler: async ({ id, payload: msg }) => {
+  const stopRisk = startConsumer({
+    redis: sub,
+    stream: CHANNELS.RISK_RESPONSES,
+    group: 'orchestrator',
+    logger,
+    idempotency: { redis: kv, keyFn: (p) => p.requestId, ttlSeconds: STREAM_IDEMP_TTL_SECONDS },
+    dlqStream: DLQ.RISK_RESPONSES,
+    maxFailures: STREAM_MAX_FAILURES,
+    handler: async ({ id, payload: msg }) => {
       try {
         const { requestId, ok } = msg;
         const p = pending.get(requestId);
         if (p) {
           pending.delete(requestId);
           if (ok) {
-            const order = { orderId: requestId, symbol: p.symbol, side: p.side || 'buy', qty: 1, traceId: msg.traceId, ts: new Date().toISOString() };
+            const order = {
+              orderId: requestId,
+              symbol: p.symbol,
+              side: p.side || 'buy',
+              qty: 1,
+              traceId: msg.traceId,
+              ts: new Date().toISOString(),
+            };
             await xaddJSON(pub, CHANNELS.EXEC_ORDERS, order);
           } else {
             await xaddJSON(pub, CHANNELS.NOTIFY_EVENTS, {
-              type: 'risk_rejected', severity: 'info', message: 'Trade rejected by risk', context: msg, traceId: msg.traceId, ts: new Date().toISOString()
+              type: 'risk_rejected',
+              severity: 'info',
+              message: 'Trade rejected by risk',
+              context: msg,
+              traceId: msg.traceId,
+              ts: new Date().toISOString(),
             });
           }
         }
-      } catch (e) { logger.error('risk_response_handler_error', { error: String(e?.message || e) }); }
-    } });
+      } catch (e) {
+        logger.error('risk_response_handler_error', { error: String(e?.message || e) });
+      }
+    },
+  });
 
-  const stopExec = startConsumer({ redis: sub, stream: CHANNELS.EXEC_STATUS, group: 'orchestrator', logger, idempotency: { redis: kv, keyFn: (p)=>p.orderId, ttlSeconds: STREAM_IDEMP_TTL_SECONDS }, dlqStream: DLQ.EXEC_STATUS, maxFailures: STREAM_MAX_FAILURES, handler: async ({ id, payload: msg }) => {
+  const stopExec = startConsumer({
+    redis: sub,
+    stream: CHANNELS.EXEC_STATUS,
+    group: 'orchestrator',
+    logger,
+    idempotency: { redis: kv, keyFn: (p) => p.orderId, ttlSeconds: STREAM_IDEMP_TTL_SECONDS },
+    dlqStream: DLQ.EXEC_STATUS,
+    maxFailures: STREAM_MAX_FAILURES,
+    handler: async ({ id, payload: msg }) => {
       try {
         if (msg.status === 'filled') {
           const profit = parseFloat(msg.profit || '0');
-          try { await insertAudit(pgPool, { type: 'order_filled', severity: 'info', payload: msg, requestId: msg.orderId, traceId: msg.traceId }); } catch {}
+          try {
+            await insertAudit(pgPool, {
+              type: 'order_filled',
+              severity: 'info',
+              payload: msg,
+              requestId: msg.orderId,
+              traceId: msg.traceId,
+            });
+          } catch {}
           const status = await incrementPnl(kv, profit);
-          try { await upsertPnl(pgPool, status); } catch {}
+          try {
+            await upsertPnl(pgPool, status);
+          } catch {}
           if (!status.halted && status.percent >= status.dailyTargetPct) {
             await setHalted(kv, true);
-            try { await insertAudit(pgPool, { type: 'daily_target_reached', severity: 'info', payload: status, requestId: msg.orderId, traceId: msg.traceId }); } catch {}
-            await xaddJSON(pub, CHANNELS.ORCH_CMDS, { type: 'halt', reason: 'daily_target_reached', ts: new Date().toISOString(), traceId: msg.traceId });
-            await xaddJSON(pub, CHANNELS.NOTIFY_EVENTS, { type: 'daily_target_reached', severity: 'info', context: status, traceId: msg.traceId, ts: new Date().toISOString() });
+            try {
+              await insertAudit(pgPool, {
+                type: 'daily_target_reached',
+                severity: 'info',
+                payload: status,
+                requestId: msg.orderId,
+                traceId: msg.traceId,
+              });
+            } catch {}
+            await xaddJSON(pub, CHANNELS.ORCH_CMDS, {
+              type: 'halt',
+              reason: 'daily_target_reached',
+              ts: new Date().toISOString(),
+              traceId: msg.traceId,
+            });
+            await xaddJSON(pub, CHANNELS.NOTIFY_EVENTS, {
+              type: 'daily_target_reached',
+              severity: 'info',
+              context: status,
+              traceId: msg.traceId,
+              ts: new Date().toISOString(),
+            });
+          }
+          // Loss-triggered optimizer request (optional)
+          try {
+            const ENABLE_OPT_ON_LOSS =
+              (process.env.ENABLE_OPT_ON_LOSS || 'false').toLowerCase() === 'true';
+            const MIN_LOSS = parseFloat(process.env.OPT_MIN_LOSS || '0'); // trigger if profit <= -MIN_LOSS
+            const COOLDOWN_SEC = parseInt(process.env.OPT_COOLDOWN_SECONDS || '1800', 10);
+            if (ENABLE_OPT_ON_LOSS && profit <= -Math.abs(MIN_LOSS)) {
+              const key = 'opt:cooldown:loss';
+              const exists = await kv.exists(key);
+              if (!exists) {
+                const req = {
+                  reason: 'loss',
+                  orderId: msg.orderId,
+                  profit,
+                  symbol: msg.symbol,
+                  side: msg.side,
+                  qty: msg.qty,
+                  traceId: msg.traceId,
+                  ts: new Date().toISOString(),
+                };
+                await xaddJSON(pub, 'opt.requests', req);
+                await kv.set(key, '1', 'EX', isNaN(COOLDOWN_SEC) ? 1800 : COOLDOWN_SEC);
+                await xaddJSON(pub, CHANNELS.NOTIFY_EVENTS, {
+                  type: 'optimizer_requested',
+                  severity: 'info',
+                  message: 'Loss-triggered optimizer request',
+                  context: { profit, minLoss: MIN_LOSS },
+                  traceId: msg.traceId,
+                  ts: new Date().toISOString(),
+                });
+              }
+            }
+          } catch (e) {
+            logger.error('optimizer_request_error', { error: String(e?.message || e) });
           }
         }
-      } catch (e) { logger.error('exec_status_handler_error', { error: String(e?.message || e) }); }
-    } });
+      } catch (e) {
+        logger.error('exec_status_handler_error', { error: String(e?.message || e) });
+      }
+    },
+  });
 })();
 
 // 404
@@ -340,10 +802,18 @@ const server = app.listen(PORT, () => {
 const shutdown = async () => {
   logger.info('shutting_down');
   server.close(() => logger.info('server_closed'));
-  try { await sub.quit(); } catch {}
-  try { await pub.quit(); } catch {}
-  try { await kv.quit(); } catch {}
-  try { await pgPool.end(); } catch {}
+  try {
+    await sub.quit();
+  } catch {}
+  try {
+    await pub.quit();
+  } catch {}
+  try {
+    await kv.quit();
+  } catch {}
+  try {
+    await pgPool.end();
+  } catch {}
   process.exit(0);
 };
 process.on('SIGINT', shutdown);

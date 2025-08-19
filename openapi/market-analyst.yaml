@@ -1,31 +1,85 @@
 openapi: 3.0.3
 info:
   title: Claude Market Analyst API
-  version: 0.1.0
+  version: 0.2.0
+  description: Market data ingestion and signal generation.
 paths:
   /health:
     get:
+      tags: [Market Analyst]
       summary: Health check
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/TraceId'
       responses:
         '200': { description: OK }
   /metrics:
     get:
+      tags: [Market Analyst]
       summary: Prometheus metrics
       responses:
         '200': { description: OK }
-  /analysis/ingest:
-    post:
-      summary: Ingest market data
-      responses:
-        '202': { description: Accepted }
-  /analysis/signal:
+  /status:
     get:
-      summary: Get trading signal
+      tags: [Market Analyst]
+      summary: Standardized status
       responses:
         '200': { description: OK }
+  /execute:
+    post:
+      tags: [Market Analyst]
+      summary: Execute (not implemented)
+      responses:
+        '501': { description: Not Implemented }
+  /optimize:
+    post:
+      tags: [Market Analyst]
+      summary: Optimize (not implemented)
+      responses:
+        '501': { description: Not Implemented }
+  /analysis/ingest:
+    post:
+      tags: [Market Analyst]
+      summary: Ingest market data
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/TraceId'
+      requestBody:
+        required: false
+      responses:
+        '202': { description: Accepted }
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /analysis/signal:
+    get:
+      tags: [Market Analyst]
+      summary: Get trading signal (preview)
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/TraceId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  signal: { type: string, enum: [buy, sell, hold] }
+                  confidence: { type: number }
+              examples:
+                example:
+                  value: { signal: hold, confidence: 0.0 }
   /analysis/analyze:
     post:
+      tags: [Market Analyst]
       summary: Analyze a symbol and produce a signal
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/TraceId'
       requestBody:
         required: true
         content:
@@ -35,6 +89,9 @@ paths:
               properties:
                 symbol: { type: string }
                 requestId: { type: string }
+            examples:
+              example:
+                value: { symbol: BTC-USD, requestId: '123' }
       responses:
         '200':
           description: OK
@@ -47,4 +104,36 @@ paths:
                   symbol: { type: string }
                   side: { type: string, enum: [buy, sell] }
                   confidence: { type: number }
-                  ts: { type: string }
+                  ts: { type: string, format: date-time }
+              examples:
+                example:
+                  value:
+                    {
+                      requestId: '123',
+                      symbol: BTC-USD,
+                      side: buy,
+                      confidence: 0.7,
+                      ts: '2024-01-01T00:00:00Z',
+                    }
+
+components:
+  parameters:
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      schema: { type: string }
+      description: Correlation request ID.
+    TraceId:
+      name: X-Trace-Id
+      in: header
+      required: false
+      schema: { type: string }
+      description: Correlation trace ID.
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+        message: { type: string }
+        details: {}

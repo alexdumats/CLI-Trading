@@ -1,25 +1,52 @@
 openapi: 3.0.3
 info:
   title: Claude Parameter Optimizer API
-  version: 0.1.0
+  version: 0.2.0
+  description: Loss-triggered optimizer for strategy parameters.
 paths:
   /health:
     get:
+      tags: [Parameter Optimizer]
       summary: Health check
       responses:
         '200': { description: OK }
   /metrics:
     get:
+      tags: [Parameter Optimizer]
       summary: Prometheus metrics
       responses:
         '200': { description: OK }
+  /status:
+    get:
+      tags: [Parameter Optimizer]
+      summary: Standardized status
+      responses:
+        '200': { description: OK }
+  /optimize:
+    post:
+      tags: [Parameter Optimizer]
+      summary: Run parameter optimization (alias)
+      responses:
+        '202': { description: Accepted }
   /optimize/run:
     post:
+      tags: [Parameter Optimizer]
       summary: Run parameter optimization
+      requestBody:
+        required: false
       responses:
         '202': { description: Accepted }
   /optimize/params:
     get:
+      tags: [Parameter Optimizer]
       summary: Get optimized parameters
       responses:
-        '200': { description: OK }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  params: { type: object }
+                  note: { type: string }

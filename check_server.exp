@@ -1,0 +1,19 @@
+#\!/usr/bin/expect -f
+
+set timeout 30
+set host "91.99.103.119"
+set user "root"
+set password "CQGT8hcWLZCV8G"
+
+spawn ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no $user@$host "echo '=== Server Status ===' && uname -a && echo '=== Memory ===' && free -h && echo '=== Disk Space ===' && df -h / && echo '=== Docker Status ===' && docker --version 2>/dev/null || echo 'Docker not installed'"
+
+expect {
+    "*password*:" {
+        send "$password\r"
+        expect eof
+    }
+    timeout {
+        puts "❌ Connection timeout"
+        exit 1
+    }
+}

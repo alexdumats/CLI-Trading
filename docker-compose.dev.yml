@@ -1,0 +1,224 @@
+# Development-focused Docker Compose configuration
+# Optimized for local development and testing
+
+services:
+  # Core infrastructure - reduced resource requirements
+  redis:
+    image: redis:7-alpine
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-dev-data:/data
+    networks: [backend]
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=trading_user
+      - POSTGRES_PASSWORD=dev_password
+      - POSTGRES_DB=trading_dev
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-dev-data:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U trading_user -d trading_dev']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Core agents - simplified for development
+  orchestrator:
+    build: ./agents/orchestrator
+    ports:
+      - '7001:7001'
+    environment:
+      - NODE_ENV=development
+      - SERVICE_NAME=Dev Orchestrator
+      - PORT=7001
+      - REDIS_URL=redis://redis:6379
+      - COMM_MODE=redis
+      - START_EQUITY=10000
+      - DAILY_TARGET_PCT=0.5
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [backend]
+    volumes:
+      - ./agents/orchestrator:/app:ro
+
+  portfolio-manager:
+    build: ./agents/portfolio-manager
+    ports:
+      - '7002:7002'
+    environment:
+      - NODE_ENV=development
+      - SERVICE_NAME=Dev Portfolio Manager
+      - PORT=7002
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [backend]
+    volumes:
+      - ./agents/portfolio-manager:/app:ro
+
+  market-analyst:
+    build: ./agents/market-analyst
+    ports:
+      - '7003:7003'
+    environment:
+      - NODE_ENV=development
+      - SERVICE_NAME=Dev Market Analyst
+      - PORT=7003
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [backend]
+    volumes:
+      - ./agents/market-analyst:/app:ro
+
+  risk-manager:
+    build: ./agents/risk-manager
+    ports:
+      - '7004:7004'
+    environment:
+      - NODE_ENV=development
+      - SERVICE_NAME=Dev Risk Manager
+      - PORT=7004
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [backend]
+    volumes:
+      - ./agents/risk-manager:/app:ro
+
+  trade-executor:
+    build: ./agents/trade-executor
+    ports:
+      - '7005:7005'
+    environment:
+      - NODE_ENV=development
+      - SERVICE_NAME=Dev Trade Executor
+      - PORT=7005
+      - REDIS_URL=redis://redis:6379
+      - PROFIT_PER_TRADE=0.01
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [backend]
+    volumes:
+      - ./agents/trade-executor:/app:ro
+
+  notification-manager:
+    build: ./agents/notification-manager
+    ports:
+      - '7006:7006'
+    environment:
+      - NODE_ENV=development
+      - SERVICE_NAME=Dev Notification Manager
+      - PORT=7006
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [backend]
+    volumes:
+      - ./agents/notification-manager:/app:ro
+
+  parameter-optimizer:
+    build: ./agents/parameter-optimizer
+    ports:
+      - '7007:7007'
+    environment:
+      - NODE_ENV=development
+      - SERVICE_NAME=Dev Parameter Optimizer
+      - PORT=7007
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [backend]
+    volumes:
+      - ./agents/parameter-optimizer:/app:ro
+
+  mcp-hub-controller:
+    build: ./agents/mcp-hub-controller
+    ports:
+      - '7008:7008'
+    environment:
+      - NODE_ENV=development
+      - SERVICE_NAME=Dev MCP Hub Controller
+      - PORT=7008
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [backend]
+    volumes:
+      - ./agents/mcp-hub-controller:/app:ro
+
+  # Development tools
+  integrations-broker:
+    build: ./agents/integrations-broker
+    ports:
+      - '7010:7010'
+    environment:
+      - NODE_ENV=development
+      - SERVICE_NAME=Dev Integrations Broker
+      - PORT=7010
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [backend]
+    volumes:
+      - ./agents/integrations-broker:/app:ro
+
+  # Monitoring stack - simplified for dev
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - '9090:9090'
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+    networks: [backend]
+    depends_on:
+      - postgres
+      - redis
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - '3000:3000'
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-dev-data:/var/lib/grafana
+    networks: [backend]
+    depends_on:
+      - prometheus
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  redis-dev-data:
+  postgres-dev-data:
+  grafana-dev-data:

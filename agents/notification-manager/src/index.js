@@ -4,10 +4,37 @@ import client from 'prom-client';
 import { createLogger } from '../../../common/logger.js';
 import fs from 'node:fs';
 import { traceMiddleware, requestLoggerMiddleware } from '../../../common/trace.js';
+import { startConsumer, startPendingMonitor } from '../../../common/streams.js';
 
 // Allow ADMIN_TOKEN to be supplied via file for secrets handling
 if (process.env.ADMIN_TOKEN_FILE && !process.env.ADMIN_TOKEN) {
-  try { process.env.ADMIN_TOKEN = fs.readFileSync(process.env.ADMIN_TOKEN_FILE, 'utf8').trim(); } catch {}
+  try {
+    process.env.ADMIN_TOKEN = fs.readFileSync(process.env.ADMIN_TOKEN_FILE, 'utf8').trim();
+  } catch {}
+}
+// Allow Slack webhook URLs to be supplied via files for secrets handling
+const readSecret = (p) => {
+  try {
+    return fs.readFileSync(p, 'utf8').trim();
+  } catch {
+    return undefined;
+  }
+};
+if (process.env.SLACK_WEBHOOK_URL_FILE && !process.env.SLACK_WEBHOOK_URL) {
+  const v = readSecret(process.env.SLACK_WEBHOOK_URL_FILE);
+  if (v) process.env.SLACK_WEBHOOK_URL = v;
+}
+if (process.env.SLACK_WEBHOOK_URL_INFO_FILE && !process.env.SLACK_WEBHOOK_URL_INFO) {
+  const v = readSecret(process.env.SLACK_WEBHOOK_URL_INFO_FILE);
+  if (v) process.env.SLACK_WEBHOOK_URL_INFO = v;
+}
+if (process.env.SLACK_WEBHOOK_URL_WARNING_FILE && !process.env.SLACK_WEBHOOK_URL_WARNING) {
+  const v = readSecret(process.env.SLACK_WEBHOOK_URL_WARNING_FILE);
+  if (v) process.env.SLACK_WEBHOOK_URL_WARNING = v;
+}
+if (process.env.SLACK_WEBHOOK_URL_CRITICAL_FILE && !process.env.SLACK_WEBHOOK_URL_CRITICAL) {
+  const v = readSecret(process.env.SLACK_WEBHOOK_URL_CRITICAL_FILE);
+  if (v) process.env.SLACK_WEBHOOK_URL_CRITICAL = v;
 }
 
 const SERVICE_NAME = process.env.SERVICE_NAME || 'Claude Notification Manager';
@@ -22,7 +49,7 @@ sub.on('error', (err) => console.error(`[${SERVICE_NAME}] Redis sub error:`, err
 
 // Channels
 const CHANNELS = {
-  NOTIFY_EVENTS: 'notify.events'
+  NOTIFY_EVENTS: 'notify.events',
 };
 
 // In-memory store of recent events
@@ -42,10 +69,14 @@ const httpRequestDuration = new client.Histogram({
   name: 'http_request_duration_seconds',
   help: 'Duration of HTTP requests in seconds',
   labelNames: ['method', 'path', 'status'],
-  buckets: [0.05, 0.1, 0.3, 0.5, 1, 2, 5]
+  buckets: [0.05, 0.1, 0.3, 0.5, 1, 2, 5],
 });
 register.registerMetric(httpRequestDuration);
-const streamPendingGauge = new client.Gauge({ name: 'stream_pending_count', help: 'Pending messages in Redis Streams', labelNames: ['stream','group'] });
+const streamPendingGauge = new client.Gauge({
+  name: 'stream_pending_count',
+  help: 'Pending messages in Redis Streams',
+  labelNames: ['stream', 'group'],
+});
 register.registerMetric(streamPendingGauge);
 
 // Timing middleware
@@ -59,12 +90,19 @@ app.use((req, res, next) => {
 app.get('/health', async (req, res) => {
   let redisStatus = 'unknown';
   try {
-    await pub.ping(); await sub.ping();
+    await pub.ping();
+    await sub.ping();
     redisStatus = 'ok';
   } catch (e) {
     redisStatus = 'error';
   }
-  res.json({ status: 'ok', service: SERVICE_NAME, redis: redisStatus, uptime: process.uptime(), ts: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    service: SERVICE_NAME,
+    redis: redisStatus,
+    uptime: process.uptime(),
+    ts: new Date().toISOString(),
+  });
 });
 
 // Metrics
@@ -73,23 +111,45 @@ app.get('/metrics', async (req, res) => {
   res.end(await register.metrics());
 });
 
+// Standardized status
+app.get('/status', async (req, res) => {
+  let redisStatus = 'unknown';
+  try {
+    await pub.ping();
+    await sub.ping();
+    redisStatus = 'ok';
+  } catch {
+    redisStatus = 'error';
+  }
+  res.json({
+    status: 'ok',
+    service: SERVICE_NAME,
+    role: 'notification-manager',
+    version: process.env.npm_package_version || '0.0.0',
+    uptime: process.uptime(),
+    deps: { redis: redisStatus },
+  });
+});
+
 // REST endpoints
-app.post('/notify', (req, res) => res.status(202).json({ status: 'accepted', id: 'demo-notify-id' }));
+app.post('/notify', (req, res) =>
+  res.status(202).json({ status: 'accepted', id: 'demo-notify-id' })
+);
 app.get('/notify/status/:id', (req, res) => res.json({ id: req.params.id, delivered: false }));
 app.get('/notify/recent', async (req, res) => {
   try {
     // Batch check ack state via pipeline
-    const ids = recent.map(e => e.traceId || e.requestId).filter(Boolean);
+    const ids = recent.map((e) => e.traceId || e.requestId).filter(Boolean);
     const keys = ids.map(ackKey);
     let acks = [];
     if (keys.length) {
       const pipe = sub.pipeline();
-      keys.forEach(k => pipe.exists(k));
+      keys.forEach((k) => pipe.exists(k));
       const results = await pipe.exec();
-      acks = results.map(r => (Array.isArray(r) ? r[1] : r));
+      acks = results.map((r) => (Array.isArray(r) ? r[1] : r));
     }
     let idx = 0;
-    const withAck = recent.map(e => {
+    const withAck = recent.map((e) => {
       const id = e.traceId || e.requestId;
       const acked = id ? Boolean(acks[idx++]) : false;
       return { ...e, acked };
@@ -102,10 +162,13 @@ app.get('/notify/recent', async (req, res) => {
 
 // Admin: acknowledge an event (persisted in Redis)
 const ACK_TTL_SECONDS = parseInt(process.env.ACK_TTL_SECONDS || '604800', 10);
-function ackKey(id) { return `notify:ack:${id}`; }
+function ackKey(id) {
+  return `notify:ack:${id}`;
+}
 app.post('/admin/notify/ack', async (req, res) => {
   const token = req.header('x-admin-token') || '';
-  if (!process.env.ADMIN_TOKEN || token !== process.env.ADMIN_TOKEN) return res.status(401).json({ error: 'unauthorized' });
+  if (!process.env.ADMIN_TOKEN || token !== process.env.ADMIN_TOKEN)
+    return res.status(401).json({ error: 'unauthorized' });
   const { traceId, requestId } = req.body || {};
   const id = traceId || requestId;
   if (!id) return res.status(400).json({ error: 'missing_trace_or_request_id' });
@@ -120,7 +183,8 @@ app.post('/admin/notify/ack', async (req, res) => {
 // Admin: inspect DLQ (optional forwarder to Orchestrator admin endpoints)
 app.get('/admin/dlq', async (req, res) => {
   const token = req.header('x-admin-token') || '';
-  if (!process.env.ADMIN_TOKEN || token !== process.env.ADMIN_TOKEN) return res.status(401).json({ error: 'unauthorized' });
+  if (!process.env.ADMIN_TOKEN || token !== process.env.ADMIN_TOKEN)
+    return res.status(401).json({ error: 'unauthorized' });
   const stream = `${CHANNELS.NOTIFY_EVENTS}.dlq`;
   try {
     const entries = await sub.xrange(stream, '-', '+', 'COUNT', 50);
@@ -140,19 +204,33 @@ const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL || '';
 await (async () => {
   const stream = CHANNELS.NOTIFY_EVENTS;
   const group = 'notify';
-  startPendingMonitor({ redis: sub, stream, group, onCount: (c)=> streamPendingGauge.set({stream, group}, c) });
+  startPendingMonitor({
+    redis: sub,
+    stream,
+    group,
+    onCount: (c) => streamPendingGauge.set({ stream, group }, c),
+  });
   startConsumer({
     redis: sub,
     stream,
     group,
     logger,
-    idempotency: { redis: sub, keyFn: (e)=> e.requestId || `${e.type}:${e.traceId || ''}:${e.ts || ''}`, ttlSeconds: parseInt(process.env.STREAM_IDEMP_TTL_SECONDS || '86400', 10) },
+    idempotency: {
+      redis: sub,
+      keyFn: (e) => e.requestId || `${e.type}:${e.traceId || ''}:${e.ts || ''}`,
+      ttlSeconds: parseInt(process.env.STREAM_IDEMP_TTL_SECONDS || '86400', 10),
+    },
     dlqStream: `${stream}.dlq`,
     maxFailures: parseInt(process.env.STREAM_MAX_FAILURES || '5', 10),
     handler: async ({ payload: event }) => {
       recent.push({ ...event, receivedAt: new Date().toISOString() });
       if (recent.length > MAX_EVENTS) recent.shift();
-      logger.info('notify_event', { type: event.type, severity: event.severity, requestId: event.requestId, traceId: event.traceId });
+      logger.info('notify_event', {
+        type: event.type,
+        severity: event.severity,
+        requestId: event.requestId,
+        traceId: event.traceId,
+      });
 
       // Build Slack payload (Block Kit)
       const sev = (event.severity || 'info').toLowerCase();
@@ -164,35 +242,52 @@ await (async () => {
         { type: 'mrkdwn', text: `*Type:*\n${event.type || 'n/a'}` },
         { type: 'mrkdwn', text: `*Severity:*\n${sev.toUpperCase()}` },
         { type: 'mrkdwn', text: `*Trace ID:*\n${event.traceId || 'n/a'}` },
-        { type: 'mrkdwn', text: `*Request ID:*\n${event.requestId || 'n/a'}` }
+        { type: 'mrkdwn', text: `*Request ID:*\n${event.requestId || 'n/a'}` },
       ];
       if (event.context && typeof event.context === 'object') {
-        fields.push({ type: 'mrkdwn', text: `*Context:*\n\`\`${JSON.stringify(event.context).slice(0, 500)}\`\`` });
+        fields.push({
+          type: 'mrkdwn',
+          text: `*Context:*\n\`\`${JSON.stringify(event.context).slice(0, 500)}\`\``,
+        });
       }
       const blocks = [
         { type: 'header', text: { type: 'plain_text', text: `${emoji} ${title}`, emoji: true } },
         { type: 'section', fields },
       ];
       if (grafanaUrl || promUrl) {
-        const links = [grafanaUrl ? `<${grafanaUrl}|Grafana>` : null, promUrl ? `<${promUrl}|Prometheus>` : null].filter(Boolean).join(' | ');
+        const links = [
+          grafanaUrl ? `<${grafanaUrl}|Grafana>` : null,
+          promUrl ? `<${promUrl}|Prometheus>` : null,
+        ]
+          .filter(Boolean)
+          .join(' | ');
         if (links) blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: links }] });
       }
       const payload = { text: `${sev.toUpperCase()}: ${title}`, blocks };
 
-      const hook = (sev === 'critical' && process.env.SLACK_WEBHOOK_URL_CRITICAL)
-        || (sev === 'warning' && process.env.SLACK_WEBHOOK_URL_WARNING)
-        || (sev === 'info' && process.env.SLACK_WEBHOOK_URL_INFO)
-        || SLACK_WEBHOOK_URL;
+      const hook =
+        (sev === 'critical' && process.env.SLACK_WEBHOOK_URL_CRITICAL) ||
+        (sev === 'warning' && process.env.SLACK_WEBHOOK_URL_WARNING) ||
+        (sev === 'info' && process.env.SLACK_WEBHOOK_URL_INFO) ||
+        SLACK_WEBHOOK_URL;
 
       if (hook) {
-        const resp = await fetch(hook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const resp = await fetch(hook, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
         if (!resp.ok) throw new Error(`slack_webhook_status_${resp.status}`);
       }
-    }
+    },
   });
 })();
 
 // 404
+// Standardized stubs
+app.post('/execute', (req, res) => res.status(501).json({ error: 'not_implemented' }));
+app.post('/optimize', (req, res) => res.status(501).json({ error: 'not_implemented' }));
+
 app.use((req, res) => {
   res.status(404).json({ error: 'not_found', path: req.path });
 });
@@ -204,8 +299,12 @@ const server = app.listen(PORT, () => {
 const shutdown = async () => {
   logger.info('shutting_down');
   server.close(() => logger.info('server_closed'));
-  try { await sub.quit(); } catch {}
-  try { await pub.quit(); } catch {}
+  try {
+    await sub.quit();
+  } catch {}
+  try {
+    await pub.quit();
+  } catch {}
   process.exit(0);
 };
 process.on('SIGINT', shutdown);

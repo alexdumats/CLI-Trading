@@ -1,0 +1,41 @@
+---
+# Repo
+repo_url: 'https://github.com/your-org/CLI-trading.git'
+repo_dest: '/opt/cli-trading'
+
+# Domains and TLS (Traefik)
+traefik_domain: 'traefik.example.com'
+orch_domain: 'orch.example.com'
+grafana_domain: 'graf.example.com'
+prom_domain: 'prom.example.com'
+letsencrypt_email: 'you@example.com'
+
+# Core env
+node_env: 'production'
+comm_mode: 'redis'
+redis_url: 'redis://redis:6379/0'
+start_equity: 10000
+daily_target_pct: 1.2
+postgres_user: 'postgres'
+postgres_db: 'trading'
+
+# Slack
+slack_bot_token: 'xoxb-...' # bot token
+slack_signing_secret: '...' # signing secret
+slack_webhook_url: 'https://hooks.slack.com/services/...' # default webhook
+slack_webhook_url_info: '' # optional
+slack_webhook_url_warning: '' # optional
+slack_webhook_url_critical: '' # optional
+
+# Admin and DB secrets
+admin_token: 'changeme'
+postgres_password: 'postgrespass'
+
+# OAuth (optional)
+enable_oauth: false
+oauth2_client_id: ''
+oauth2_client_secret: ''
+oauth2_cookie_secret: '' # 32+ random bytes
+
+# Git branch/tag
+git_version: 'main'

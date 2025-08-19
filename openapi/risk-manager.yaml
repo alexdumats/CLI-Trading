@@ -1,21 +1,31 @@
 openapi: 3.0.3
 info:
   title: Claude Risk Manager API
-  version: 0.1.0
+  version: 0.2.0
+  description: Risk rule evaluation and limit controls.
 paths:
   /health:
     get:
+      tags: [Risk Manager]
       summary: Health check
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/TraceId'
       responses:
         '200': { description: OK }
   /metrics:
     get:
+      tags: [Risk Manager]
       summary: Prometheus metrics
       responses:
         '200': { description: OK }
   /risk/evaluate:
     post:
+      tags: [Risk Manager]
       summary: Evaluate risk of a request
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/TraceId'
       requestBody:
         required: true
         content:
@@ -38,8 +48,36 @@ paths:
                   ok: { type: boolean }
                   reason: { type: string }
                   riskScore: { type: number }
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
   /risk/limits:
     get:
+      tags: [Risk Manager]
       summary: Get risk limits
       responses:
         '200': { description: OK }
+
+components:
+  parameters:
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      schema: { type: string }
+      description: Correlation request ID.
+    TraceId:
+      name: X-Trace-Id
+      in: header
+      required: false
+      schema: { type: string }
+      description: Correlation trace ID.
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+        message: { type: string }
+        details: {}

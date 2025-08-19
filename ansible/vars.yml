@@ -1,0 +1,56 @@
+---
+# Repository configuration - UPDATE THIS WITH YOUR ACTUAL REPO URL
+repo_url: 'https://github.com/alexdumats/CLI-trading.git'
+repo_dest: '/opt/cli-trading'
+git_version: 'main'
+
+# Domains and TLS (Traefik) - Using IP addresses for now
+traefik_domain: '91.99.103.119:8080'
+orch_domain: '91.99.103.119:7001'
+grafana_domain: '91.99.103.119:3000'
+prom_domain: '91.99.103.119:9090'
+letsencrypt_email: 'admin@example.com'
+
+# Core environment settings
+node_env: 'production'
+comm_mode: 'redis'
+redis_url: 'redis://redis:6379/0'
+start_equity: 10000
+daily_target_pct: 1.2
+profit_per_trade: 10
+
+# Database configuration
+postgres_user: 'postgres'
+postgres_db: 'trading'
+postgres_password: 'SecureTrading2025!'
+
+# SLACK CONFIGURATION - Your actual credentials
+slack_bot_token: '{{ vault_slack_bot_token }}'
+slack_signing_secret: '{{ vault_slack_signing_secret }}'
+slack_webhook_url: '{{ vault_slack_webhook_url }}'
+
+# Optional additional Slack webhooks for different log levels
+slack_webhook_url_info: ''
+slack_webhook_url_warning: ''
+slack_webhook_url_critical: ''
+
+# Security tokens
+admin_token: 'SecureAdminToken2025!'
+
+# OAuth configuration (disabled for now)
+enable_oauth: false
+oauth2_client_id: ''
+oauth2_client_secret: ''
+oauth2_cookie_secret: ''
+
+# Integrations (disabled for now)
+enable_jira: false
+enable_notion: false
+
+# Rate limiting for Orchestrator
+orch_rl_avg: 10
+orch_rl_burst: 20
+
+# Grafana admin credentials
+grafana_admin_user: 'admin'
+grafana_admin_password: 'SecureGrafana2025!'

@@ -18,7 +18,7 @@ const httpRequestDuration = new client.Histogram({
   name: 'http_request_duration_seconds',
   help: 'Duration of HTTP requests in seconds',
   labelNames: ['method', 'path', 'status'],
-  buckets: [0.05, 0.1, 0.3, 0.5, 1, 2, 5]
+  buckets: [0.05, 0.1, 0.3, 0.5, 1, 2, 5],
 });
 register.registerMetric(httpRequestDuration);
 
@@ -44,7 +44,13 @@ app.get('/health', async (req, res) => {
   } catch (e) {
     redisStatus = 'error';
   }
-  res.json({ status: 'ok', service: SERVICE_NAME, redis: redisStatus, uptime: process.uptime(), ts: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    service: SERVICE_NAME,
+    redis: redisStatus,
+    uptime: process.uptime(),
+    ts: new Date().toISOString(),
+  });
 });
 
 // Metrics
@@ -53,14 +59,38 @@ app.get('/metrics', async (req, res) => {
   res.end(await register.metrics());
 });
 
+// Standardized status
+app.get('/status', async (req, res) => {
+  let redisStatus = 'unknown';
+  try {
+    await redis.ping();
+    redisStatus = 'ok';
+  } catch {
+    redisStatus = 'error';
+  }
+  res.json({
+    status: 'ok',
+    service: SERVICE_NAME,
+    role: 'mcp-hub-controller',
+    version: process.env.npm_package_version || '0.0.0',
+    uptime: process.uptime(),
+    deps: { redis: redisStatus },
+  });
+});
+
 // Role endpoints
 
 // MCP endpoints
 app.get('/mcp/status', (req, res) => res.json({ status: 'ok', hubs: [] }));
-app.post('/mcp/command', (req, res) => res.status(202).json({ status: 'accepted', command: req.body || {} }));
-
+app.post('/mcp/command', (req, res) =>
+  res.status(202).json({ status: 'accepted', command: req.body || {} })
+);
 
 // 404
+// Standardized stubs
+app.post('/execute', (req, res) => res.status(501).json({ error: 'not_implemented' }));
+app.post('/optimize', (req, res) => res.status(501).json({ error: 'not_implemented' }));
+
 app.use((req, res) => {
   res.status(404).json({ error: 'not_found', path: req.path });
 });
@@ -72,7 +102,9 @@ const server = app.listen(PORT, () => {
 const shutdown = async () => {
   console.log(`[${SERVICE_NAME}] shutting down...`);
   server.close(() => console.log(`[${SERVICE_NAME}] server closed`));
-  try { await redis.quit(); } catch (e) {}
+  try {
+    await redis.quit();
+  } catch (e) {}
   process.exit(0);
 };
 process.on('SIGINT', shutdown);

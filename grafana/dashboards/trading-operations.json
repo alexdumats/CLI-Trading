@@ -1,0 +1,511 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "CLI Trading - Operations Dashboard",
+    "tags": ["trading", "operations", "monitoring"],
+    "timezone": "browser",
+    "refresh": "30s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "System Status Overview",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "up{job=~\".*trading.*\"}",
+            "legendFormat": "{{instance}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                { "color": "red", "value": 0 },
+                { "color": "green", "value": 1 }
+              ]
+            },
+            "mappings": [
+              { "options": { "0": { "text": "DOWN" } }, "type": "value" },
+              { "options": { "1": { "text": "UP" } }, "type": "value" }
+            ]
+          }
+        },
+        "gridPos": { "h": 4, "w": 12, "x": 0, "y": 0 }
+      },
+      {
+        "id": 2,
+        "title": "Trading System Halt Status",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "trading_system_halted",
+            "legendFormat": "Halted",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                { "color": "green", "value": 0 },
+                { "color": "red", "value": 1 }
+              ]
+            },
+            "mappings": [
+              { "options": { "0": { "text": "ACTIVE" } }, "type": "value" },
+              { "options": { "1": { "text": "HALTED" } }, "type": "value" }
+            ]
+          }
+        },
+        "gridPos": { "h": 4, "w": 12, "x": 12, "y": 0 }
+      },
+      {
+        "id": 3,
+        "title": "Daily PnL",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "trading_daily_pnl_usd",
+            "legendFormat": "PnL ($)",
+            "refId": "A"
+          },
+          {
+            "expr": "trading_daily_pnl_pct",
+            "legendFormat": "PnL (%)",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "barAlignment": 0,
+              "lineWidth": 2,
+              "fillOpacity": 10,
+              "gradientMode": "none",
+              "spanNulls": false,
+              "insertNulls": false,
+              "showPoints": "never",
+              "pointSize": 5
+            },
+            "color": { "mode": "palette-classic" },
+            "thresholds": {
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "red", "value": -100 }
+              ]
+            }
+          }
+        },
+        "gridPos": { "h": 8, "w": 24, "x": 0, "y": 4 }
+      },
+      {
+        "id": 4,
+        "title": "Trading Volume",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(trading_orders_completed_total[5m]) * 60",
+            "legendFormat": "Orders/min",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(trading_volume_usd_total[5m]) * 60",
+            "legendFormat": "Volume $/min",
+            "refId": "B"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 }
+      },
+      {
+        "id": 5,
+        "title": "Risk Metrics",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(trading_risk_rejections_total[5m]) * 60",
+            "legendFormat": "Rejections/min",
+            "refId": "A"
+          },
+          {
+            "expr": "trading_risk_score",
+            "legendFormat": "Risk Score",
+            "refId": "B"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 }
+      },
+      {
+        "id": 6,
+        "title": "API Response Times",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job=~\".*trading.*\"}[5m]))",
+            "legendFormat": "95th percentile - {{instance}}",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(http_request_duration_seconds_bucket{job=~\".*trading.*\"}[5m]))",
+            "legendFormat": "50th percentile - {{instance}}",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s"
+          }
+        },
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 }
+      },
+      {
+        "id": 7,
+        "title": "Error Rates",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(http_requests_total{code=~\"5..\",job=~\".*trading.*\"}[5m]) * 60",
+            "legendFormat": "5xx errors/min - {{instance}}",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(http_requests_total{code=~\"4..\",job=~\".*trading.*\"}[5m]) * 60",
+            "legendFormat": "4xx errors/min - {{instance}}",
+            "refId": "B"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 }
+      },
+      {
+        "id": 8,
+        "title": "Memory Usage",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "container_memory_usage_bytes{name=~\"cli-trading-.*\"} / 1024 / 1024",
+            "legendFormat": "{{name}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "decbytes"
+          }
+        },
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 }
+      },
+      {
+        "id": 9,
+        "title": "CPU Usage",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(container_cpu_usage_seconds_total{name=~\"cli-trading-.*\"}[5m]) * 100",
+            "legendFormat": "{{name}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent"
+          }
+        },
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 }
+      },
+      {
+        "id": 10,
+        "title": "Redis Metrics",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "redis_connected_clients",
+            "legendFormat": "Connected Clients",
+            "refId": "A"
+          },
+          {
+            "expr": "redis_memory_used_bytes / 1024 / 1024",
+            "legendFormat": "Memory Used (MB)",
+            "refId": "B"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 }
+      },
+      {
+        "id": 11,
+        "title": "PostgreSQL Metrics",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "pg_stat_activity_count",
+            "legendFormat": "Active Connections",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(pg_stat_database_tup_inserted[5m])",
+            "legendFormat": "Inserts/sec",
+            "refId": "B"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 }
+      },
+      {
+        "id": 12,
+        "title": "Stream Pending Messages",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "trading_stream_pending_count",
+            "legendFormat": "{{stream}} - {{group}}",
+            "refId": "A"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 44 }
+      },
+      {
+        "id": 13,
+        "title": "DLQ Message Count",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "trading_dlq_messages_total",
+            "legendFormat": "{{stream}}.dlq",
+            "refId": "A"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 44 }
+      },
+      {
+        "id": 14,
+        "title": "Recent Alerts",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "ALERTS{alertstate=\"firing\"}",
+            "format": "table",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "displayMode": "table"
+            }
+          }
+        },
+        "gridPos": { "h": 8, "w": 24, "x": 0, "y": 52 }
+      },
+      {
+        "id": 15,
+        "title": "Trade Execution Latency",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.99, rate(trading_execution_latency_seconds_bucket[5m]))",
+            "legendFormat": "99th percentile",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(trading_execution_latency_seconds_bucket[5m]))",
+            "legendFormat": "95th percentile",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(trading_execution_latency_seconds_bucket[5m]))",
+            "legendFormat": "Median",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s"
+          }
+        },
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 60 }
+      },
+      {
+        "id": 16,
+        "title": "Order Status Distribution",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "trading_orders_total",
+            "legendFormat": "{{status}}",
+            "refId": "A"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 60 }
+      },
+      {
+        "id": 17,
+        "title": "Integration Health",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "slack_api_success_rate",
+            "legendFormat": "Slack",
+            "refId": "A"
+          },
+          {
+            "expr": "jira_api_success_rate",
+            "legendFormat": "Jira",
+            "refId": "B"
+          },
+          {
+            "expr": "exchange_api_success_rate",
+            "legendFormat": "Exchange",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                { "color": "red", "value": 0 },
+                { "color": "yellow", "value": 0.8 },
+                { "color": "green", "value": 0.95 }
+              ]
+            }
+          }
+        },
+        "gridPos": { "h": 4, "w": 24, "x": 0, "y": 68 }
+      },
+      {
+        "id": 18,
+        "title": "Network I/O",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(node_network_receive_bytes_total{device!=\"lo\"}[5m]) * 8",
+            "legendFormat": "RX {{device}}",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(node_network_transmit_bytes_total{device!=\"lo\"}[5m]) * 8",
+            "legendFormat": "TX {{device}}",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "bps"
+          }
+        },
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 72 }
+      },
+      {
+        "id": 19,
+        "title": "Disk I/O",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(node_disk_read_bytes_total[5m])",
+            "legendFormat": "Read {{device}}",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(node_disk_written_bytes_total[5m])",
+            "legendFormat": "Write {{device}}",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "Bps"
+          }
+        },
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 72 }
+      },
+      {
+        "id": 20,
+        "title": "Parameter Optimizer Status",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "trading_last_optimization_timestamp",
+            "legendFormat": "Last Run",
+            "refId": "A"
+          },
+          {
+            "expr": "trading_optimization_success_rate",
+            "legendFormat": "Success Rate",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 86400 },
+                { "color": "red", "value": 172800 }
+              ]
+            }
+          }
+        },
+        "gridPos": { "h": 4, "w": 24, "x": 0, "y": 80 }
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "agent",
+          "type": "query",
+          "query": "label_values(up{job=~\".*trading.*\"}, job)",
+          "refresh": 1,
+          "includeAll": true,
+          "multi": true
+        },
+        {
+          "name": "interval",
+          "type": "interval",
+          "options": [
+            { "text": "1m", "value": "1m" },
+            { "text": "5m", "value": "5m" },
+            { "text": "15m", "value": "15m" },
+            { "text": "1h", "value": "1h" }
+          ],
+          "current": { "text": "5m", "value": "5m" }
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "name": "Deployments",
+          "datasource": "Prometheus",
+          "expr": "increase(deployment_timestamp[1m])",
+          "iconColor": "blue",
+          "titleFormat": "Deployment",
+          "textFormat": "System deployment"
+        },
+        {
+          "name": "Alerts",
+          "datasource": "Prometheus",
+          "expr": "ALERTS{alertstate=\"firing\"}",
+          "iconColor": "red",
+          "titleFormat": "{{alertname}}",
+          "textFormat": "{{summary}}"
+        }
+      ]
+    }
+  }
+}

@@ -1,21 +1,49 @@
 openapi: 3.0.3
 info:
   title: Claude Trade Executor API
-  version: 0.1.0
+  version: 0.3.0
+  description: Order submission and execution status.
 paths:
   /health:
     get:
+      tags: [Trade Executor]
       summary: Health check
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/TraceId'
       responses:
         '200': { description: OK }
   /metrics:
     get:
+      tags: [Trade Executor]
       summary: Prometheus metrics
       responses:
         '200': { description: OK }
+  /status:
+    get:
+      tags: [Trade Executor]
+      summary: Standardized status
+      responses:
+        '200': { description: OK }
+  /execute:
+    post:
+      tags: [Trade Executor]
+      summary: Execute trade (alias to /trade/submit)
+      responses:
+        '202': { description: Accepted }
+  /optimize:
+    post:
+      tags: [Trade Executor]
+      summary: Optimize (not implemented)
+      responses:
+        '501': { description: Not Implemented }
   /trade/submit:
     post:
+      tags: [Trade Executor]
       summary: Submit a trade
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/TraceId'
       requestBody:
         required: true
         content:
@@ -42,11 +70,29 @@ paths:
                   status: { type: string }
   /trade/status/{id}:
     get:
+      tags: [Trade Executor]
       summary: Get trade status
       parameters:
         - in: path
           name: id
           required: true
           schema: { type: string }
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/TraceId'
       responses:
         '200': { description: OK }
+
+components:
+  parameters:
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      schema: { type: string }
+      description: Correlation request ID.
+    TraceId:
+      name: X-Trace-Id
+      in: header
+      required: false
+      schema: { type: string }
+      description: Correlation trace ID.

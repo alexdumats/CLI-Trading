@@ -1,25 +1,39 @@
 openapi: 3.0.3
 info:
   title: Claude Portfolio Manager API
-  version: 0.1.0
+  version: 0.2.0
+  description: Portfolio holdings and rebalancing.
 paths:
   /health:
     get:
+      tags: [Portfolio Manager]
       summary: Health check
       responses:
         '200': { description: OK }
   /metrics:
     get:
+      tags: [Portfolio Manager]
       summary: Prometheus metrics
       responses:
         '200': { description: OK }
   /portfolio/holdings:
     get:
+      tags: [Portfolio Manager]
       summary: Get portfolio holdings
       responses:
-        '200': { description: OK }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  holdings:
+                    type: array
+                    items: {}
   /portfolio/rebalance:
     post:
+      tags: [Portfolio Manager]
       summary: Rebalance portfolio
       responses:
         '202': { description: Accepted }

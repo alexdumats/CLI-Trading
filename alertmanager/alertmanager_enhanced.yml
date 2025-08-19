@@ -1,0 +1,448 @@
+# Enhanced Alertmanager Configuration for CLI-Trading System
+#
+# This configuration provides sophisticated alert routing, grouping, and
+# notification delivery with escalation policies and different channels
+# based on severity and business impact.
+
+global:
+  # SMTP configuration for email notifications
+  smtp_smarthost: '${SMTP_HOST:localhost:587}'
+  smtp_from: '${ALERT_FROM_EMAIL:alerts@cli-trading.local}'
+  smtp_auth_username: '${SMTP_USERNAME:}'
+  smtp_auth_password: '${SMTP_PASSWORD:}'
+  smtp_require_tls: true
+
+  # Default notification settings
+  resolve_timeout: 5m
+  http_config:
+    follow_redirects: true
+
+# Templates for customizing notification content
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# Route configuration - determines where alerts go
+route:
+  # Default grouping and timing
+  group_by: ['alertname', 'cluster', 'service']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 12h
+  receiver: 'default-receiver'
+
+  # Routing tree for different alert types
+  routes:
+    # Critical business impact alerts - immediate escalation
+    - match:
+        business_impact: high
+      receiver: 'critical-business'
+      group_wait: 0s
+      group_interval: 5s
+      repeat_interval: 30m
+      routes:
+        # Trading system halted - immediate notification
+        - match:
+            alertname: TradingSystemHalted
+          receiver: 'trading-halt-immediate'
+          group_wait: 0s
+          repeat_interval: 5m
+
+        # Daily loss limit - immediate escalation
+        - match:
+            alertname: DailyLossLimitReached
+          receiver: 'loss-limit-escalation'
+          group_wait: 0s
+          repeat_interval: 15m
+
+        # Order execution failures
+        - match:
+            alertname: OrderExecutionFailures
+          receiver: 'execution-failure-alert'
+          group_wait: 0s
+          repeat_interval: 10m
+
+    # Critical system alerts
+    - match:
+        severity: critical
+      receiver: 'critical-system'
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 1h
+      routes:
+        # Service down alerts
+        - match:
+            alertname: ServiceDown
+          receiver: 'service-down-alert'
+          repeat_interval: 30m
+
+        # Container restart loops
+        - match:
+            alertname: ContainerRestartLoop
+          receiver: 'container-issues'
+          repeat_interval: 20m
+
+        # Database issues
+        - match_re:
+            alertname: '(RedisDown|PostgreSQLDown)'
+          receiver: 'database-critical'
+          repeat_interval: 15m
+
+    # Security alerts - always go to security team
+    - match:
+        service: security
+      receiver: 'security-team'
+      group_wait: 0s
+      repeat_interval: 2h
+      routes:
+        # Immediate security issues
+        - match:
+            alertname: SuspiciousLoginActivity
+          receiver: 'security-immediate'
+          repeat_interval: 30m
+
+    # Warning level alerts
+    - match:
+        severity: warning
+      receiver: 'warning-alerts'
+      group_wait: 5m
+      group_interval: 10m
+      repeat_interval: 4h
+
+    # Integration failures
+    - match:
+        service: integration
+      receiver: 'integration-alerts'
+      group_wait: 2m
+      repeat_interval: 2h
+
+    # Infrastructure monitoring alerts
+    - match:
+        service: monitoring
+      receiver: 'monitoring-alerts'
+      repeat_interval: 6h
+
+# Inhibition rules - suppress certain alerts when others are firing
+inhibit_rules:
+  # Suppress all alerts if Prometheus is down
+  - source_match:
+      alertname: PrometheusDown
+    target_match_re:
+      alertname: '.*'
+    equal: ['instance']
+
+  # Suppress service alerts if the entire host is down
+  - source_match:
+      alertname: ServiceDown
+    target_match_re:
+      alertname: '(HighMemoryUsage|HighCPUUsage|HighDiskUsage)'
+    equal: ['instance']
+
+  # Suppress container alerts if service is down
+  - source_match:
+      alertname: ServiceDown
+    target_match_re:
+      alertname: 'Container.*'
+    equal: ['instance']
+
+  # Suppress API alerts if service is down
+  - source_match:
+      alertname: ServiceDown
+    target_match_re:
+      alertname: '(HighHTTPErrorRate|HighAPILatency)'
+    equal: ['instance']
+
+# Notification receivers
+receivers:
+  # Default catch-all receiver
+  - name: 'default-receiver'
+    slack_configs:
+      - api_url: '${ALERT_SLACK_WEBHOOK_URL}'
+        channel: '${ALERT_SLACK_CHANNEL:#trading-alerts}'
+        title: 'CLI-Trading Alert'
+        text: >
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Severity:* {{ .Labels.severity }}
+          *Time:* {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+        send_resolved: true
+
+  # Critical business impact alerts - multiple channels
+  - name: 'critical-business'
+    slack_configs:
+      - api_url: '${ALERT_SLACK_WEBHOOK_URL_CRITICAL}'
+        channel: '#trading-critical'
+        title: '🚨 CRITICAL BUSINESS ALERT'
+        text: >
+          {{ range .Alerts }}
+          🚨 *CRITICAL BUSINESS IMPACT* 🚨
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Business Impact:* {{ .Labels.business_impact }}
+          *Time:* {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+        send_resolved: true
+    email_configs:
+      - to: '${CRITICAL_ALERT_EMAIL}'
+        subject: 'CRITICAL: CLI-Trading Business Alert'
+        body: |
+          Critical business alert in CLI-Trading system:
+
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Business Impact: {{ .Labels.business_impact }}
+          Time: {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+    webhook_configs:
+      - url: '${PAGERDUTY_WEBHOOK_URL}'
+        send_resolved: true
+
+  # Trading system halt - immediate notification
+  - name: 'trading-halt-immediate'
+    slack_configs:
+      - api_url: '${ALERT_SLACK_WEBHOOK_URL_CRITICAL}'
+        channel: '#trading-critical'
+        title: '🛑 TRADING SYSTEM HALTED'
+        text: >
+          🛑 *TRADING SYSTEM HALTED* 🛑
+
+          The automated trading system has been halted and is not executing any new trades.
+
+          *Time:* {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          *Action Required:* Immediate investigation and manual intervention needed.
+        color: 'danger'
+        send_resolved: true
+        actions:
+          - type: button
+            text: 'Unhalt System'
+            url: '${ORCHESTRATOR_URL}/admin/orchestrate/unhalt'
+          - type: button
+            text: 'View Logs'
+            url: '${GRAFANA_URL}/d/trading-ops/trading-operations'
+    webhook_configs:
+      - url: '${TEAMS_WEBHOOK_URL}'
+        send_resolved: true
+
+  # Loss limit reached - escalation chain
+  - name: 'loss-limit-escalation'
+    slack_configs:
+      - api_url: '${ALERT_SLACK_WEBHOOK_URL_CRITICAL}'
+        channel: '#trading-critical'
+        title: '📉 DAILY LOSS LIMIT REACHED'
+        text: >
+          📉 *DAILY LOSS LIMIT REACHED* 📉
+
+          The trading system has reached the daily loss limit.
+
+          {{ range .Alerts }}
+          *Current PnL:* {{ .Value }}%
+          *Time:* {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+
+          *Actions Required:*
+          • Review trading parameters
+          • Analyze loss causes
+          • Consider manual intervention
+        color: 'danger'
+        send_resolved: true
+    email_configs:
+      - to: '${TRADING_MANAGER_EMAIL}'
+        subject: 'URGENT: Daily Loss Limit Reached - CLI Trading'
+        body: |
+          The CLI-Trading system has reached the configured daily loss limit.
+
+          Current PnL: {{ .Value }}%
+          Time: {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+
+          Immediate review and action required.
+
+  # Order execution failures
+  - name: 'execution-failure-alert'
+    slack_configs:
+      - api_url: '${ALERT_SLACK_WEBHOOK_URL_WARNING}'
+        channel: '#trading-alerts'
+        title: '⚠️ Order Execution Failures'
+        text: >
+          ⚠️ *High Order Execution Failure Rate* ⚠️
+
+          {{ range .Alerts }}
+          *Failure Rate:* {{ .Value }} failures/second
+          *Description:* {{ .Annotations.description }}
+          *Time:* {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+        color: 'warning'
+        send_resolved: true
+
+  # Critical system alerts
+  - name: 'critical-system'
+    slack_configs:
+      - api_url: '${ALERT_SLACK_WEBHOOK_URL_CRITICAL}'
+        channel: '#ops-critical'
+        title: '🔥 Critical System Alert'
+        text: >
+          🔥 *Critical System Issue* 🔥
+
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Service:* {{ .Labels.service }}
+          *Instance:* {{ .Labels.instance }}
+          *Time:* {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+        color: 'danger'
+        send_resolved: true
+
+  # Service down specific alerts
+  - name: 'service-down-alert'
+    slack_configs:
+      - api_url: '${ALERT_SLACK_WEBHOOK_URL_CRITICAL}'
+        channel: '#ops-critical'
+        title: '🚫 Service Down'
+        text: >
+          🚫 *Service Down Alert* 🚫
+
+          {{ range .Alerts }}
+          *Service:* {{ .Labels.job }}
+          *Instance:* {{ .Labels.instance }}
+          *Duration:* {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+        color: 'danger'
+        send_resolved: true
+        actions:
+          - type: button
+            text: 'Check Health'
+            url: '${GRAFANA_URL}/d/system-health/system-health-dashboard'
+
+  # Container issues
+  - name: 'container-issues'
+    slack_configs:
+      - api_url: '${ALERT_SLACK_WEBHOOK_URL_WARNING}'
+        channel: '#ops-alerts'
+        title: '🐳 Container Issues'
+        text: >
+          🐳 *Container Issues Detected* 🐳
+
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Container:* {{ .Labels.name }}
+          *Description:* {{ .Annotations.description }}
+          {{ end }}
+        send_resolved: true
+
+  # Database critical alerts
+  - name: 'database-critical'
+    slack_configs:
+      - api_url: '${ALERT_SLACK_WEBHOOK_URL_CRITICAL}'
+        channel: '#database-alerts'
+        title: '💾 Database Critical Alert'
+        text: >
+          💾 *Database Critical Issue* 💾
+
+          {{ range .Alerts }}
+          *Database:* {{ .Labels.alertname }}
+          *Description:* {{ .Annotations.description }}
+          *Time:* {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+        color: 'danger'
+        send_resolved: true
+
+  # Security team alerts
+  - name: 'security-team'
+    slack_configs:
+      - api_url: '${SECURITY_SLACK_WEBHOOK_URL}'
+        channel: '#security-alerts'
+        title: '🛡️ Security Alert'
+        text: >
+          🛡️ *Security Alert* 🛡️
+
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Instance:* {{ .Labels.instance }}
+          *Time:* {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+        color: 'warning'
+        send_resolved: true
+    email_configs:
+      - to: '${SECURITY_TEAM_EMAIL}'
+        subject: 'Security Alert - CLI Trading System'
+        body: |
+          Security alert in CLI-Trading system:
+
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Instance: {{ .Labels.instance }}
+          Time: {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+
+  # Immediate security alerts
+  - name: 'security-immediate'
+    slack_configs:
+      - api_url: '${SECURITY_SLACK_WEBHOOK_URL}'
+        channel: '#security-immediate'
+        title: '🚨 IMMEDIATE Security Alert'
+        text: >
+          🚨 *IMMEDIATE SECURITY ATTENTION REQUIRED* 🚨
+
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Instance:* {{ .Labels.instance }}
+          *Time:* {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+        color: 'danger'
+        send_resolved: true
+    webhook_configs:
+      - url: '${SECURITY_PAGERDUTY_URL}'
+        send_resolved: true
+
+  # Warning level alerts
+  - name: 'warning-alerts'
+    slack_configs:
+      - api_url: '${ALERT_SLACK_WEBHOOK_URL_WARNING}'
+        channel: '${ALERT_SLACK_CHANNEL:#trading-alerts}'
+        title: '⚠️ Warning Alert'
+        text: >
+          ⚠️ *Warning* ⚠️
+
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Service:* {{ .Labels.service }}
+          {{ end }}
+        color: 'warning'
+        send_resolved: true
+
+  # Integration failure alerts
+  - name: 'integration-alerts'
+    slack_configs:
+      - api_url: '${ALERT_SLACK_WEBHOOK_URL_INFO}'
+        channel: '#integrations'
+        title: '🔌 Integration Alert'
+        text: >
+          🔌 *Integration Issue* 🔌
+
+          {{ range .Alerts }}
+          *Service:* {{ .Labels.service }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          {{ end }}
+        send_resolved: true
+
+  # Monitoring system alerts
+  - name: 'monitoring-alerts'
+    slack_configs:
+      - api_url: '${ALERT_SLACK_WEBHOOK_URL_INFO}'
+        channel: '#monitoring'
+        title: '📊 Monitoring Alert'
+        text: >
+          📊 *Monitoring System Alert* 📊
+
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          {{ end }}
+        send_resolved: true

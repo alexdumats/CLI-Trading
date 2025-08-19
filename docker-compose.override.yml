@@ -1,0 +1,67 @@
+# Local-friendly overrides: expose service ports to localhost for quick testing
+# Do not use in production. For prod, keep services internal behind Traefik/OAuth2.
+
+services:
+  orchestrator:
+    ports:
+      - '7001:7001'
+
+  market-analyst:
+    ports:
+      - '7002:7002'
+
+  portfolio-manager:
+    ports:
+      - '7003:7003'
+
+  risk-manager:
+    ports:
+      - '7004:7004'
+
+  trade-executor:
+    ports:
+      - '7005:7005'
+
+  notification-manager:
+    ports:
+      - '7006:7006'
+
+  parameter-optimizer:
+    ports:
+      - '7007:7007'
+
+  mcp-hub-controller:
+    ports:
+      - '7008:7008'
+
+  integrations-broker:
+    ports:
+      - '7010:7010'
+
+  redis:
+    ports:
+      - '6379:6379'
+
+  postgres:
+    ports:
+      - '5432:5432'
+
+  prometheus:
+    ports:
+      - '9090:9090'
+
+  grafana:
+    ports:
+      - '3000:3000'
+
+  alertmanager:
+    ports:
+      - '9093:9093'
+
+  loki:
+    ports:
+      - '3100:3100'
+
+  oauth2-proxy:
+    ports:
+      - '4180:4180'

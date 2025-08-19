@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Claude Notification Manager API
-  version: 0.1.0
+  version: 0.2.0
 paths:
   /health:
     get:
@@ -26,7 +26,7 @@ paths:
                 type: { type: string }
                 severity: { type: string, enum: [info, warning, critical] }
                 message: { type: string }
-                context: { }
+                context: {}
       responses:
         '202': { description: Accepted }
   /notify/status/{id}:
@@ -44,3 +44,42 @@ paths:
       summary: Get recent notification events
       responses:
         '200': { description: OK }
+
+  # Admin endpoints (require X-Admin-Token)
+  /admin/notify/ack:
+    post:
+      summary: Acknowledge a notification event (by traceId or requestId)
+      security:
+        - AdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [traceId]
+                  properties:
+                    traceId: { type: string }
+                - type: object
+                  required: [requestId]
+                  properties:
+                    requestId: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  acked: { type: string }
+
+components:
+  securitySchemes:
+    AdminToken:
+      type: apiKey
+      in: header
+      name: X-Admin-Token
+      description: Admin token required for privileged endpoints.

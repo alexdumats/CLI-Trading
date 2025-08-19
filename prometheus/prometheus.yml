@@ -26,3 +26,9 @@ scrape_configs:
           - notification-manager:7006
           - parameter-optimizer:7007
           - mcp-hub-controller:7008
+  - job_name: 'redis_exporter'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+  - job_name: 'postgres_exporter'
+    static_configs:
+      - targets: ['postgres-exporter:9187']

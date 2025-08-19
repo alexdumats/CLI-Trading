@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Claude Orchestrator API
-  version: 0.1.0
+  version: 0.2.0
 paths:
   /health:
     get:
@@ -13,6 +13,22 @@ paths:
       summary: Prometheus metrics
       responses:
         '200': { description: OK }
+  /status:
+    get:
+      summary: Standardized status
+      responses:
+        '200': { description: OK }
+  /execute:
+    post:
+      summary: Execute (alias to /orchestrate/run in HTTP mode)
+      responses:
+        '202': { description: Accepted }
+        '500': { description: Error }
+  /optimize:
+    post:
+      summary: Optimize (not implemented)
+      responses:
+        '501': { description: Not Implemented }
   /orchestrate/run:
     post:
       summary: Start orchestration
@@ -38,3 +54,137 @@ paths:
       summary: Get current PnL status
       responses:
         '200': { description: OK }
+
+  # Admin endpoints (require X-Admin-Token)
+  /admin/orchestrate/halt:
+    post:
+      summary: Manually halt orchestration
+      security:
+        - AdminToken: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, example: maintenance }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  halted: { type: boolean }
+  /admin/orchestrate/unhalt:
+    post:
+      summary: Manually unhalt orchestration
+      security:
+        - AdminToken: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  halted: { type: boolean }
+  /admin/pnl/reset:
+    post:
+      summary: Reset PnL day state
+      security:
+        - AdminToken: []
+      responses:
+        '200': { description: OK }
+  /admin/streams/pending:
+    get:
+      summary: Get summary of pending entries for a stream/group
+      security:
+        - AdminToken: []
+      parameters:
+        - in: query
+          name: stream
+          required: true
+          schema: { type: string }
+        - in: query
+          name: group
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stream: { type: string }
+                  group: { type: string }
+                  summary:
+                    type: array
+                    description: Redis XPENDING summary response
+                    items: {}
+  /admin/streams/dlq:
+    get:
+      summary: List DLQ entries
+      security:
+        - AdminToken: []
+      parameters:
+        - in: query
+          name: stream
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stream: { type: string }
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        payload: {}
+  /admin/streams/dlq/requeue:
+    post:
+      summary: Requeue a DLQ entry back to its original stream
+      security:
+        - AdminToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dlqStream, id]
+              properties:
+                dlqStream: { type: string }
+                id: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  requeuedId: { type: string }
+
+components:
+  securitySchemes:
+    AdminToken:
+      type: apiKey
+      in: header
+      name: X-Admin-Token
+      description: Admin token required for privileged endpoints.

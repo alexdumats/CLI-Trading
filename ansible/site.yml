@@ -1,0 +1,14 @@
+---
+- name: Provision CLI-Trading stack
+  hosts: cli_trading
+  become: true
+  vars:
+    docker_packages:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+  roles:
+    - role: docker
+    - role: cli_trading_deploy

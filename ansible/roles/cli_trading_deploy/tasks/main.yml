@@ -1,0 +1,106 @@
+---
+- name: Ensure repo root
+  ansible.builtin.file:
+    path: '{{ repo_dest }}'
+    state: directory
+    mode: '0755'
+
+- name: Checkout repo
+  ansible.builtin.git:
+    repo: '{{ repo_url }}'
+    dest: '{{ repo_dest }}'
+    version: '{{ git_version }}'
+    force: yes
+
+- name: Ensure secrets dir
+  ansible.builtin.file:
+    path: '{{ repo_dest }}/secrets'
+    state: directory
+    mode: '0700'
+
+- name: Write base secrets
+  ansible.builtin.copy:
+    dest: '{{ repo_dest }}/secrets/{{ item.name }}'
+    content: '{{ item.value }}'
+    mode: '0600'
+  loop:
+    - { name: 'admin_token', value: '{{ admin_token }}' }
+    - { name: 'postgres_password', value: '{{ postgres_password }}' }
+
+- name: Write Slack secrets
+  ansible.builtin.copy:
+    dest: '{{ repo_dest }}/secrets/{{ item.name }}'
+    content: '{{ item.value }}'
+    mode: '0600'
+  loop:
+    - { name: 'slack_bot_token', value: '{{ slack_bot_token }}' }
+    - { name: 'slack_signing_secret', value: '{{ slack_signing_secret }}' }
+    - { name: 'slack_webhook_url', value: '{{ slack_webhook_url }}' }
+    - { name: 'slack_webhook_url_info', value: '{{ slack_webhook_url_info }}' }
+    - { name: 'slack_webhook_url_warning', value: '{{ slack_webhook_url_warning }}' }
+    - { name: 'slack_webhook_url_critical', value: '{{ slack_webhook_url_critical }}' }
+
+- name: Optionally write OAuth secrets
+  when: enable_oauth | default(false)
+  ansible.builtin.copy:
+    dest: '{{ repo_dest }}/secrets/{{ item.name }}'
+    content: '{{ item.value }}'
+    mode: '0600'
+  loop:
+    - { name: 'oauth2_client_id', value: '{{ oauth2_client_id }}' }
+    - { name: 'oauth2_client_secret', value: '{{ oauth2_client_secret }}' }
+    - { name: 'oauth2_cookie_secret', value: '{{ oauth2_cookie_secret }}' }
+
+- name: Render .env
+  ansible.builtin.copy:
+    dest: '{{ repo_dest }}/.env'
+    mode: '0644'
+    content: |
+      NODE_ENV={{ node_env }}
+      COMM_MODE={{ comm_mode }}
+      REDIS_URL={{ redis_url }}
+      START_EQUITY={{ start_equity }}
+      DAILY_TARGET_PCT={{ daily_target_pct }}
+      POSTGRES_HOST=postgres
+      POSTGRES_PORT=5432
+      POSTGRES_USER={{ postgres_user }}
+      POSTGRES_DB={{ postgres_db }}
+
+      # Traefik domains / TLS
+      TRAEFIK_DOMAIN={{ traefik_domain }}
+      ORCH_DOMAIN={{ orch_domain }}
+      GRAFANA_DOMAIN={{ grafana_domain }}
+      PROM_DOMAIN={{ prom_domain }}
+      LETSENCRYPT_EMAIL={{ letsencrypt_email }}
+
+      # Optional rate limits
+      ORCH_RL_AVG=10
+      ORCH_RL_BURST=20
+
+- name: Pull images and build
+  ansible.builtin.shell: |
+    docker compose pull || true
+    docker compose build
+  args:
+    chdir: '{{ repo_dest }}'
+
+- name: Bring up the stack
+  ansible.builtin.shell: |
+    if {{ enable_oauth | default(false) | ternary('true','false') }}; then
+      docker compose up -d
+    else
+      docker compose up -d --scale oauth2-proxy=0
+    fi
+  args:
+    chdir: '{{ repo_dest }}'
+
+- name: Wait for orchestrator health
+  ansible.builtin.shell: |
+    for i in $(seq 1 60); do
+      wget -qO- http://localhost:7001/health && exit 0 || true
+      sleep 2
+    done
+    echo "orchestrator did not become healthy in time" >&2
+    exit 1
+  args:
+    chdir: '{{ repo_dest }}'

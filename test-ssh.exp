@@ -1,0 +1,32 @@
+#!/usr/bin/expect -f
+
+set timeout 20
+set host "91.99.103.119"
+set user "root"
+set password "CQGT8hcWLZCV8G"
+
+spawn ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no $user@$host "echo 'SSH connection successful'"
+
+expect {
+    "*password*:" {
+        send "$password\r"
+        expect {
+            "SSH connection successful" {
+                puts "✅ Password authentication works!"
+                exit 0
+            }
+            timeout {
+                puts "❌ Timeout after password entry"
+                exit 1
+            }
+        }
+    }
+    "Permission denied" {
+        puts "❌ Permission denied"
+        exit 1
+    }
+    timeout {
+        puts "❌ Connection timeout"
+        exit 1
+    }
+}

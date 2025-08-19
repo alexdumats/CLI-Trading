@@ -1,30 +1,124 @@
-# Messaging Contracts (Redis Pub/Sub)
+# Messaging Contracts (Redis Streams)
 
-All inter-agent messaging uses Redis pub/sub on the `backend` Docker network. Channels and payloads are JSON. All messages must include a `ts` ISO timestamp and stable identifiers where indicated.
+All inter‑agent messaging standardizes on Redis Streams (XADD/XREADGROUP) on the internal `backend` Docker network. Payloads are JSON stored under the `data` field of each stream entry. Every message must include `ts` (ISO 8601). Stable identifiers are required where applicable and are propagated across streams:
 
-Channels:
+- requestId — correlation across analysis → risk → exec
+- orderId — execution life cycle (often equals requestId in this scaffold)
+- traceId — end‑to‑end tracing across services
+
+Streams and message schemas
+
 - orchestrator.commands
-  - analyze request: { type: 'analyze', requestId: string, symbol: string, ts }
-  - halt request: { type: 'halt', ts }
+  - analyze: { type: 'analyze', requestId, symbol, traceId, ts }
+  - halt: { type: 'halt', reason?, traceId, ts }
 - analysis.signals
-  - signal: { requestId: string, symbol: string, side: 'buy'|'sell', confidence: number, ts }
+  - { requestId, symbol, side: 'buy'|'sell', confidence: number, traceId, ts }
 - risk.requests
-  - { requestId: string, symbol: string, side: 'buy'|'sell', confidence: number, ts }
+  - { requestId, symbol, side, confidence, traceId, ts }
 - risk.responses
-  - { requestId: string, ok: boolean, reason?: string, ts }
+  - { requestId, ok: boolean, reason?: string, traceId, ts }
 - exec.orders
-  - { orderId: string, symbol: string, side: 'buy'|'sell', qty: number, ts }
+  - { orderId, symbol, side, qty, traceId, ts }
 - exec.status
-  - { orderId: string, status: 'filled'|'rejected'|'failed'|'pending', symbol: string, side: string, qty: number, ts }
+  - { orderId, status: 'filled'|'rejected'|'failed'|'pending', symbol, side, qty, profit?, traceId, ts }
 - notify.events
-  - { type: string, severity: 'info'|'warning'|'critical', message?: string, context?: any, ts }
+  - { type, severity: 'info'|'warning'|'critical', message?, context?, requestId?, traceId, ts }
 
-ID semantics:
-- requestId: created by Orchestrator when requesting analysis; propagated through risk.
-- orderId: created by Orchestrator when submitting orders; may equal requestId for 1:1 mapping in this scaffold.
+Consumer groups (who reads what)
 
-Reliability:
-- Pub/sub is fire-and-forget. For production consider Redis streams or a durable queue (e.g., NATS, Kafka, RabbitMQ) with ack/retry.
+- analyst → orchestrator.commands
+- risk → risk.requests
+- exec → exec.orders
+- orchestrator → analysis.signals, risk.responses, exec.status
+- notify → notify.events
 
-Security:
-- Channels are internal-only on the Docker network. If exposing Redis outside, require auth and TLS.
+Dataflow (Mermaid)
+
+```mermaid
+flowchart LR
+  subgraph Orchestrator
+    O[Orchestrator]
+  end
+  subgraph Analyst
+    A[Market Analyst]
+  end
+  subgraph Risk
+    R[Risk Manager]
+  end
+  subgraph Exec
+    E[Trade Executor]
+  end
+  subgraph Notify
+    N[Notification Manager]
+  end
+
+  O -- XADD --> OC[orchestrator.commands]
+  OC -- GROUP analyst --> A
+  A -- XADD --> AS[analysis.signals]
+  AS -- GROUP orchestrator --> O
+  O -- XADD --> RR[risk.requests]
+  RR -- GROUP risk --> R
+  R -- XADD --> RS[risk.responses]
+  RS -- GROUP orchestrator --> O
+  O -- XADD --> EO[exec.orders]
+  EO -- GROUP exec --> E
+  E -- XADD --> ES[exec.status]
+  ES -- GROUP orchestrator --> O
+
+  O -- notify: manual halt/unhalt & daily_target_reached --> NE[notify.events]
+  R -- notify: risk_rejected --> NE
+  NE -- GROUP notify --> N
+
+  classDef stream fill:#eef,stroke:#99f,stroke-width:1px,color:#333;
+  class OC,AS,RR,RS,EO,ES,NE stream;
+```
+
+Notes
+
+- Each primary stream has a DLQ at `<stream>.dlq` when `maxFailures` is exceeded.
+- Admin can inspect/requeue via Orchestrator:
+  - GET /admin/streams/pending?stream=&group=
+  - GET /admin/streams/dlq?stream=
+  - POST /admin/streams/dlq/requeue { dlqStream, id }
+
+Idempotency (per consumer)
+Consumers compute idempotency keys from stable identifiers and store short‑lived keys in Redis to avoid duplicate processing:
+
+- orchestrator/analysis.signals: key = requestId
+- orchestrator/risk.responses: key = requestId
+- orchestrator/exec.status: key = orderId
+- analyst/orchestrator.commands: key = requestId
+- risk/risk.requests: key = requestId
+- exec/exec.orders: key = orderId
+- notify/notify.events: key = requestId, or fallback `${type}:${traceId}:${ts}`
+
+Dead‑letter queues (DLQ)
+
+- On handler error, failures are retried. After `maxFailures` (default 5), the message is moved to `<stream>.dlq` with payload:
+  - { originalStream, group, id, payload, error, ts }
+- DLQ streams exist alongside each primary stream:
+  - orchestrator.commands.dlq, analysis.signals.dlq, risk.requests.dlq, risk.responses.dlq, exec.orders.dlq, exec.status.dlq, notify.events.dlq
+
+Admin operations (Orchestrator service)
+
+- GET /admin/streams/pending?stream=<stream>&group=<group>
+  - Returns Redis XPENDING summary: [count, smallestId, greatestId, [[consumer, count]...]]
+- GET /admin/streams/dlq?stream=<dlq>
+  - Lists entries (id + parsed payload)
+- POST /admin/streams/dlq/requeue { dlqStream, id }
+  - Re‑publishes original payload to its `originalStream` and deletes the DLQ entry
+    All admin endpoints require header: `X-Admin-Token: <ADMIN_TOKEN>`.
+
+Monitoring
+
+- Prometheus metric `stream_pending_count{stream,group}` gauges pending messages per stream/group (exported by agents using `startPendingMonitor`).
+
+Reliability notes
+
+- Use consumer groups per role; horizontal scale by adding consumers to the same group.
+- Use idempotency TTLs to bound duplicate suppression windows (default 24h).
+- Prefer one stream per logical topic with a single consumer group per role.
+
+Security
+
+- Redis is internal‑only on the Docker network. If externalizing, require AUTH and TLS and use distinct credentials per environment/service.

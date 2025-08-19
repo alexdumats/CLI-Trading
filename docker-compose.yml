@@ -14,8 +14,8 @@ services:
       - --api.dashboard=true
       - --api.insecure=false
     ports:
-      - "80:80"
-      - "443:443"
+      - '80:80'
+      - '443:443'
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - traefik-letsencrypt:/letsencrypt
@@ -31,22 +31,38 @@ services:
       - traefik.http.routers.traefik.middlewares=traefik-auth,traefik-allow
     networks: [public]
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+        reservations:
+          memory: 256M
 
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes"]
+    command: ['redis-server', '--appendonly', 'yes']
     volumes:
       - redis-data:/data
     networks: [backend]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
       timeout: 3s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+        reservations:
+          memory: 256M
+    restart: unless-stopped
 
   orchestrator:
     build: ./agents/orchestrator
     read_only: true
+    restart: unless-stopped
     cap_drop:
       - ALL
     security_opt:
@@ -97,10 +113,17 @@ services:
       - traefik.http.routers.orch-admin.tls.options=mtls@file
       - traefik.http.routers.orch-admin.middlewares=oauth2-forwardauth,orch-rl
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:7001/health || exit 1"]
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:7001/health || exit 1']
       interval: 5s
       timeout: 3s
       retries: 20
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+        reservations:
+          memory: 256M
     depends_on:
       redis:
         condition: service_healthy
@@ -109,6 +132,7 @@ services:
   portfolio-manager:
     build: ./agents/portfolio-manager
     read_only: true
+    restart: unless-stopped
     cap_drop:
       - ALL
     security_opt:
@@ -121,6 +145,18 @@ services:
       - SERVICE_NAME=Claude Portfolio Manager
       - PORT=7002
       - REDIS_URL=${REDIS_URL}
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:7002/health || exit 1']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          memory: 128M
     depends_on:
       redis:
         condition: service_healthy
@@ -129,6 +165,7 @@ services:
   market-analyst:
     build: ./agents/market-analyst
     read_only: true
+    restart: unless-stopped
     cap_drop:
       - ALL
     security_opt:
@@ -141,6 +178,18 @@ services:
       - SERVICE_NAME=Claude Market Analyst
       - PORT=7003
       - REDIS_URL=${REDIS_URL}
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:7003/health || exit 1']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          memory: 128M
     depends_on:
       redis:
         condition: service_healthy
@@ -149,6 +198,7 @@ services:
   risk-manager:
     build: ./agents/risk-manager
     read_only: true
+    restart: unless-stopped
     cap_drop:
       - ALL
     security_opt:
@@ -161,6 +211,18 @@ services:
       - SERVICE_NAME=Claude Risk Manager
       - PORT=7004
       - REDIS_URL=${REDIS_URL}
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:7004/health || exit 1']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          memory: 128M
     depends_on:
       redis:
         condition: service_healthy
@@ -169,6 +231,7 @@ services:
   trade-executor:
     build: ./agents/trade-executor
     read_only: true
+    restart: unless-stopped
     cap_drop:
       - ALL
     security_opt:
@@ -182,6 +245,18 @@ services:
       - PORT=7005
       - REDIS_URL=${REDIS_URL}
       - PROFIT_PER_TRADE=${PROFIT_PER_TRADE}
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:7005/health || exit 1']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          memory: 128M
     depends_on:
       redis:
         condition: service_healthy
@@ -190,6 +265,7 @@ services:
   notification-manager:
     build: ./agents/notification-manager
     read_only: true
+    restart: unless-stopped
     cap_drop:
       - ALL
     security_opt:
@@ -206,12 +282,73 @@ services:
       - SLACK_WEBHOOK_URL_INFO=${SLACK_WEBHOOK_URL_INFO}
       - SLACK_WEBHOOK_URL_WARNING=${SLACK_WEBHOOK_URL_WARNING}
       - SLACK_WEBHOOK_URL_CRITICAL=${SLACK_WEBHOOK_URL_CRITICAL}
+      - SLACK_WEBHOOK_URL_FILE=/run/secrets/slack_webhook_url
+      - SLACK_WEBHOOK_URL_INFO_FILE=/run/secrets/slack_webhook_url_info
+      - SLACK_WEBHOOK_URL_WARNING_FILE=/run/secrets/slack_webhook_url_warning
+      - SLACK_WEBHOOK_URL_CRITICAL_FILE=/run/secrets/slack_webhook_url_critical
       - GRAFANA_URL=${GRAFANA_URL}
       - PROM_URL=${PROM_URL}
       - ADMIN_TOKEN=${ADMIN_TOKEN}
       - ADMIN_TOKEN_FILE=/run/secrets/admin_token
     secrets:
       - admin_token
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:7006/health || exit 1']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          memory: 128M
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [backend]
+
+  integrations-broker:
+    build: ./agents/integrations-broker
+    read_only: true
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /run:rw,noexec,nosuid,size=16m
+    environment:
+      - NODE_ENV=${NODE_ENV}
+      - SERVICE_NAME=Claude Integrations Broker
+      - PORT=7010
+      - REDIS_URL=${REDIS_URL}
+      - ENABLE_JIRA=${ENABLE_JIRA}
+      - ENABLE_NOTION=${ENABLE_NOTION}
+      - JIRA_BASE_URL=${JIRA_BASE_URL}
+      - JIRA_EMAIL=${JIRA_EMAIL}
+      - JIRA_API_TOKEN_FILE=/run/secrets/jira_api_token
+      - JIRA_PROJECT_KEY=${JIRA_PROJECT_KEY}
+      - JIRA_ISSUE_TYPE=${JIRA_ISSUE_TYPE}
+      - NOTION_API_TOKEN_FILE=/run/secrets/notion_api_token
+      - NOTION_DATABASE_ID=${NOTION_DATABASE_ID}
+    secrets:
+      - jira_api_token
+      - notion_api_token
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:7010/health || exit 1']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: '0.10'
+          memory: 128M
+        reservations:
+          memory: 64M
     depends_on:
       redis:
         condition: service_healthy
@@ -233,6 +370,7 @@ services:
   parameter-optimizer:
     build: ./agents/parameter-optimizer
     read_only: true
+    restart: unless-stopped
     cap_drop:
       - ALL
     security_opt:
@@ -245,6 +383,18 @@ services:
       - SERVICE_NAME=Claude Parameter Optimizer
       - PORT=7007
       - REDIS_URL=${REDIS_URL}
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:7007/health || exit 1']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          memory: 128M
     depends_on:
       redis:
         condition: service_healthy
@@ -253,6 +403,7 @@ services:
   mcp-hub-controller:
     build: ./agents/mcp-hub-controller
     read_only: true
+    restart: unless-stopped
     cap_drop:
       - ALL
     security_opt:
@@ -265,6 +416,18 @@ services:
       - SERVICE_NAME=Claude MCP Hub Controller
       - PORT=7008
       - REDIS_URL=${REDIS_URL}
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:7008/health || exit 1']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          memory: 128M
     depends_on:
       redis:
         condition: service_healthy
@@ -272,6 +435,7 @@ services:
 
   postgres:
     image: postgres:15-alpine
+    restart: unless-stopped
     environment:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD_FILE=/run/secrets/postgres_password
@@ -281,16 +445,23 @@ services:
     volumes:
       - pg-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      test: ['CMD-SHELL', 'pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB']
       interval: 5s
       timeout: 3s
       retries: 20
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 1G
+        reservations:
+          memory: 512M
     networks: [backend]
 
   migrator:
     image: node:20-alpine
     working_dir: /workspace
-    command: ["node", "scripts/migrate.js"]
+    command: ['node', 'scripts/migrate.js']
     environment:
       - POSTGRES_HOST=${POSTGRES_HOST}
       - POSTGRES_PORT=${POSTGRES_PORT}
@@ -304,15 +475,100 @@ services:
         condition: service_healthy
     networks: [backend]
 
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.63.0
+    environment:
+      - REDIS_ADDR=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [backend]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.10'
+          memory: 128M
+        reservations:
+          memory: 64M
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.13.2
+    command:
+      [
+        '/bin/sh',
+        '-c',
+        'DATA_SOURCE_NAME=postgresql://${POSTGRES_USER}:$(cat /run/secrets/postgres_password)@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}?sslmode=disable exec postgres_exporter',
+      ]
+    environment:
+      - POSTGRES_HOST=${POSTGRES_HOST}
+      - POSTGRES_PORT=${POSTGRES_PORT}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+    secrets:
+      - postgres_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [backend]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.10'
+          memory: 128M
+        reservations:
+          memory: 64M
+
+  loki:
+    image: grafana/loki:2.9.4
+    command: ['-config.file=/etc/loki/loki-config.yml']
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki-data:/loki
+    networks: [backend]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          memory: 128M
+
+  promtail:
+    image: grafana/promtail:2.9.4
+    command: ['-config.file=/etc/promtail/config.yml']
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    networks: [backend]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.10'
+          memory: 128M
+        reservations:
+          memory: 64M
+
   prometheus:
     image: prom/prometheus:latest
+    restart: unless-stopped
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
-    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
+    command: ['--config.file=/etc/prometheus/prometheus.yml', '--storage.tsdb.path=/prometheus']
     depends_on:
       alertmanager:
         condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+        reservations:
+          memory: 256M
     labels:
       - traefik.enable=true
       - traefik.http.routers.prom.rule=Host(`${PROM_DOMAIN}`)
@@ -329,22 +585,45 @@ services:
 
   alertmanager:
     image: prom/alertmanager:latest
+    restart: unless-stopped
     volumes:
       - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
-    command: ["--config.file=/etc/alertmanager/alertmanager.yml", "--storage.path=/alertmanager", "--config.expand-env=true"]
+    command:
+      [
+        '--config.file=/etc/alertmanager/alertmanager.yml',
+        '--storage.path=/alertmanager',
+        '--config.expand-env=true',
+      ]
     environment:
       - ALERT_SLACK_WEBHOOK_URL=${ALERT_SLACK_WEBHOOK_URL}
       - ALERT_SLACK_CHANNEL=${ALERT_SLACK_CHANNEL}
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          memory: 128M
     networks: [backend]
 
   grafana:
     image: grafana/grafana:latest
+    restart: unless-stopped
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
     volumes:
       - grafana-storage:/var/lib/grafana
       - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+      - ./grafana/provisioning/loki:/etc/grafana/provisioning/loki:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          memory: 128M
     labels:
       - traefik.enable=true
       - traefik.http.routers.graf.rule=Host(`${GRAFANA_DOMAIN}`)
@@ -361,6 +640,7 @@ services:
 
   oauth2-proxy:
     image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
+    restart: unless-stopped
     environment:
       - OAUTH2_PROXY_PROVIDER=${OAUTH2_PROXY_PROVIDER}
       # Client ID/Secret/Cookie Secret loaded from Docker secrets via load_secrets.sh
@@ -369,7 +649,7 @@ services:
       - OAUTH2_PROXY_REDIRECT_URL=${OAUTH2_PROXY_REDIRECT_URL}
       - OAUTH2_PROXY_UPSTREAMS=static://200
       - OAUTH2_PROXY_HTTP_ADDRESS=0.0.0.0:4180
-    command: ["/bin/sh", "-c", ". /etc/oauth2-proxy/load_secrets.sh"]
+    command: ['/bin/sh', '-c', '. /etc/oauth2-proxy/load_secrets.sh']
     volumes:
       - ./oauth2-proxy/load_secrets.sh:/etc/oauth2-proxy/load_secrets.sh:ro
     secrets:
@@ -381,7 +661,7 @@ services:
   tests:
     image: node:20-alpine
     working_dir: /workspace
-    command: ["node", "tests/integration/run_all.js"]
+    command: ['node', 'tests/integration/run_all.js']
     environment:
       - ORCH_URL=http://orchestrator:7001
       - ADMIN_TOKEN=${ADMIN_TOKEN}
@@ -402,6 +682,8 @@ volumes:
   redis-data:
   grafana-storage:
   traefik-letsencrypt:
+  loki-data:
+  pg-data:
 
 secrets:
   admin_token:
@@ -412,9 +694,21 @@ secrets:
     file: ./secrets/slack_bot_token
   slack_signing_secret:
     file: ./secrets/slack_signing_secret
+  slack_webhook_url:
+    file: ./secrets/slack_webhook_url
+  slack_webhook_url_info:
+    file: ./secrets/slack_webhook_url_info
+  slack_webhook_url_warning:
+    file: ./secrets/slack_webhook_url_warning
+  slack_webhook_url_critical:
+    file: ./secrets/slack_webhook_url_critical
   oauth2_client_id:
     file: ./secrets/oauth2_client_id
   oauth2_client_secret:
     file: ./secrets/oauth2_client_secret
   oauth2_cookie_secret:
     file: ./secrets/oauth2_cookie_secret
+  jira_api_token:
+    file: ./secrets/jira_api_token
+  notion_api_token:
+    file: ./secrets/notion_api_token

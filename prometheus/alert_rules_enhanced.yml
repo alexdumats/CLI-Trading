@@ -1,0 +1,413 @@
+# Enhanced Alert Rules for CLI-Trading System
+#
+# This file defines comprehensive alerting rules for the multi-agent trading system
+# covering system health, business metrics, and operational safety.
+
+groups:
+  # Critical System Health Alerts
+  - name: system_critical
+    interval: 10s
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: trading
+        annotations:
+          summary: 'Service {{ $labels.instance }} is down'
+          description: '{{ $labels.job }} service on {{ $labels.instance }} has been down for more than 30 seconds.'
+
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes > 0.90
+        for: 2m
+        labels:
+          severity: critical
+          service: system
+        annotations:
+          summary: 'High memory usage on {{ $labels.instance }}'
+          description: 'Memory usage is above 90% on {{ $labels.instance }} for more than 2 minutes.'
+
+      - alert: HighDiskUsage
+        expr: (node_filesystem_size_bytes{fstype!="tmpfs"} - node_filesystem_free_bytes{fstype!="tmpfs"}) / node_filesystem_size_bytes{fstype!="tmpfs"} > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: 'High disk usage on {{ $labels.instance }}'
+          description: 'Disk usage is above 85% on {{ $labels.instance }} ({{ $labels.mountpoint }}) for more than 5 minutes.'
+
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 10m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: 'High CPU usage on {{ $labels.instance }}'
+          description: 'CPU usage is above 80% on {{ $labels.instance }} for more than 10 minutes.'
+
+  # Container and Application Health
+  - name: container_health
+    interval: 15s
+    rules:
+      - alert: ContainerDown
+        expr: absent(container_last_seen{name=~"cli-trading-.*"})
+        for: 1m
+        labels:
+          severity: critical
+          service: trading
+        annotations:
+          summary: 'Container {{ $labels.name }} is not running'
+          description: 'Trading container {{ $labels.name }} has been down for more than 1 minute.'
+
+      - alert: ContainerHighMemory
+        expr: container_memory_usage_bytes{name=~"cli-trading-.*"} / container_spec_memory_limit_bytes{name=~"cli-trading-.*"} > 0.90
+        for: 5m
+        labels:
+          severity: warning
+          service: trading
+        annotations:
+          summary: 'Container {{ $labels.name }} high memory usage'
+          description: 'Container {{ $labels.name }} is using more than 90% of its memory limit for 5 minutes.'
+
+      - alert: ContainerRestartLoop
+        expr: increase(container_restart_total{name=~"cli-trading-.*"}[15m]) > 3
+        for: 0m
+        labels:
+          severity: critical
+          service: trading
+        annotations:
+          summary: 'Container {{ $labels.name }} in restart loop'
+          description: 'Container {{ $labels.name }} has restarted more than 3 times in the last 15 minutes.'
+
+  # Trading System Business Logic
+  - name: trading_business
+    interval: 30s
+    rules:
+      - alert: TradingSystemHalted
+        expr: trading_system_halted == 1
+        for: 0m
+        labels:
+          severity: critical
+          service: trading
+          business_impact: high
+        annotations:
+          summary: 'Trading system is halted'
+          description: 'The trading system has been halted. No new trades will be executed until manually unhalted.'
+
+      - alert: DailyLossLimitReached
+        expr: trading_daily_pnl_pct < -2.0
+        for: 0m
+        labels:
+          severity: critical
+          service: trading
+          business_impact: high
+        annotations:
+          summary: 'Daily loss limit reached'
+          description: 'Daily PnL has reached the loss limit of -2%. Current PnL: {{ $value }}%'
+
+      - alert: HighRiskRejectionRate
+        expr: rate(trading_risk_rejections_total[5m]) > 0.5
+        for: 2m
+        labels:
+          severity: warning
+          service: trading
+          business_impact: medium
+        annotations:
+          summary: 'High risk rejection rate'
+          description: 'Risk rejection rate is {{ $value }} rejections per second over the last 5 minutes.'
+
+      - alert: OrderExecutionFailures
+        expr: rate(trading_order_failures_total[5m]) > 0.1
+        for: 1m
+        labels:
+          severity: critical
+          service: trading
+          business_impact: high
+        annotations:
+          summary: 'High order execution failure rate'
+          description: 'Order execution failure rate is {{ $value }} failures per second over the last 5 minutes.'
+
+      - alert: StreamPendingMessagesHigh
+        expr: trading_stream_pending_count > 100
+        for: 2m
+        labels:
+          severity: warning
+          service: trading
+        annotations:
+          summary: 'High pending message count in stream {{ $labels.stream }}'
+          description: 'Stream {{ $labels.stream }} has {{ $value }} pending messages for more than 2 minutes.'
+
+      - alert: DLQMessagesAccumulating
+        expr: increase(trading_dlq_messages_total[10m]) > 5
+        for: 0m
+        labels:
+          severity: critical
+          service: trading
+        annotations:
+          summary: 'Messages accumulating in DLQ'
+          description: 'More than 5 messages have been sent to DLQ in the last 10 minutes. Check for system issues.'
+
+  # Database and Cache Health
+  - name: database_health
+    interval: 30s
+    rules:
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: database
+        annotations:
+          summary: 'Redis is down'
+          description: 'Redis server is not responding for more than 30 seconds.'
+
+      - alert: PostgreSQLDown
+        expr: pg_up == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: database
+        annotations:
+          summary: 'PostgreSQL is down'
+          description: 'PostgreSQL server is not responding for more than 30 seconds.'
+
+      - alert: RedisHighMemoryUsage
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.90
+        for: 5m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: 'Redis high memory usage'
+          description: 'Redis memory usage is above 90% for more than 5 minutes.'
+
+      - alert: PostgreSQLHighConnections
+        expr: pg_stat_activity_count > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: 'PostgreSQL high connection count'
+          description: 'PostgreSQL has more than 80 active connections for 5 minutes.'
+
+      - alert: DatabaseSlowQueries
+        expr: rate(postgres_slow_queries_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: 'High rate of slow database queries'
+          description: 'Slow query rate is {{ $value }} queries per second over the last 5 minutes.'
+
+  # API and Network Health
+  - name: api_health
+    interval: 15s
+    rules:
+      - alert: HighHTTPErrorRate
+        expr: rate(http_requests_total{code=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: 'High HTTP error rate on {{ $labels.instance }}'
+          description: 'HTTP 5xx error rate is above 10% for {{ $labels.instance }} for more than 2 minutes.'
+
+      - alert: HighAPILatency
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 5
+        for: 2m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: 'High API latency on {{ $labels.instance }}'
+          description: '95th percentile latency is above 5 seconds for {{ $labels.instance }} for more than 2 minutes.'
+
+      - alert: APIRateLimitExceeded
+        expr: rate(http_requests_total{code="429"}[5m]) > 0.5
+        for: 1m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: 'API rate limit exceeded'
+          description: 'Rate limit exceeded with {{ $value }} requests per second being throttled.'
+
+  # External Integration Health
+  - name: integration_health
+    interval: 60s
+    rules:
+      - alert: SlackIntegrationDown
+        expr: slack_api_requests_failed_total > slack_api_requests_total * 0.5
+        for: 5m
+        labels:
+          severity: warning
+          service: integration
+        annotations:
+          summary: 'Slack integration failing'
+          description: 'More than 50% of Slack API requests are failing for 5 minutes.'
+
+      - alert: JiraIntegrationDown
+        expr: jira_api_requests_failed_total > jira_api_requests_total * 0.5
+        for: 5m
+        labels:
+          severity: warning
+          service: integration
+        annotations:
+          summary: 'Jira integration failing'
+          description: 'More than 50% of Jira API requests are failing for 5 minutes.'
+
+      - alert: ExchangeAPIDown
+        expr: exchange_api_requests_failed_total > exchange_api_requests_total * 0.8
+        for: 2m
+        labels:
+          severity: critical
+          service: integration
+          business_impact: high
+        annotations:
+          summary: 'Exchange API failing'
+          description: 'More than 80% of exchange API requests are failing for 2 minutes.'
+
+  # Security and Compliance
+  - name: security
+    interval: 60s
+    rules:
+      - alert: UnauthorizedAPIAccess
+        expr: increase(http_requests_total{code="401"}[5m]) > 10
+        for: 0m
+        labels:
+          severity: warning
+          service: security
+        annotations:
+          summary: 'High number of unauthorized API requests'
+          description: 'More than 10 unauthorized requests in the last 5 minutes. Possible security issue.'
+
+      - alert: SuspiciousLoginActivity
+        expr: increase(auth_failed_attempts_total[5m]) > 20
+        for: 0m
+        labels:
+          severity: critical
+          service: security
+        annotations:
+          summary: 'Suspicious login activity detected'
+          description: 'More than 20 failed authentication attempts in 5 minutes. Possible brute force attack.'
+
+      - alert: CertificateExpiringSoon
+        expr: ssl_certificate_expiry_days < 30
+        for: 0m
+        labels:
+          severity: warning
+          service: security
+        annotations:
+          summary: 'SSL certificate expiring soon'
+          description: 'SSL certificate for {{ $labels.instance }} will expire in {{ $value }} days.'
+
+  # Performance and SLA
+  - name: performance_sla
+    interval: 30s
+    rules:
+      - alert: TradingLatencyHigh
+        expr: histogram_quantile(0.99, rate(trading_execution_latency_seconds_bucket[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+          service: trading
+          business_impact: medium
+        annotations:
+          summary: 'High trading execution latency'
+          description: '99th percentile trading execution latency is above 10 seconds for 5 minutes.'
+
+      - alert: LowThroughput
+        expr: rate(trading_orders_completed_total[5m]) < 0.1
+        for: 10m
+        labels:
+          severity: warning
+          service: trading
+          business_impact: medium
+        annotations:
+          summary: 'Low trading throughput'
+          description: 'Trading throughput is below 0.1 orders per second for 10 minutes.'
+
+      - alert: ParameterOptimizerStuck
+        expr: time() - trading_last_optimization_timestamp > 86400
+        for: 0m
+        labels:
+          severity: warning
+          service: trading
+        annotations:
+          summary: "Parameter optimizer hasn't run in 24 hours"
+          description: "The parameter optimizer hasn't completed a run in over 24 hours."
+
+  # Backup and Data Integrity
+  - name: data_integrity
+    interval: 300s # 5 minutes
+    rules:
+      - alert: BackupFailure
+        expr: time() - backup_last_success_timestamp > 172800 # 48 hours
+        for: 0m
+        labels:
+          severity: critical
+          service: backup
+        annotations:
+          summary: "Backup hasn't succeeded in 48 hours"
+          description: 'The last successful backup was more than 48 hours ago.'
+
+      - alert: DatabaseReplicationLag
+        expr: postgres_replication_lag_seconds > 300
+        for: 2m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: 'High database replication lag'
+          description: 'Database replication lag is {{ $value }} seconds for more than 2 minutes.'
+
+      - alert: DataInconsistency
+        expr: abs(trading_pnl_redis - trading_pnl_postgres) > 10
+        for: 1m
+        labels:
+          severity: critical
+          service: trading
+          business_impact: high
+        annotations:
+          summary: 'Data inconsistency detected'
+          description: 'PnL values in Redis and PostgreSQL differ by more than $10.'
+
+  # Alerting Meta Rules
+  - name: alerting_health
+    interval: 60s
+    rules:
+      - alert: AlertmanagerDown
+        expr: up{job="alertmanager"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: monitoring
+        annotations:
+          summary: 'Alertmanager is down'
+          description: 'Alertmanager has been down for more than 2 minutes. Alerts may not be delivered.'
+
+      - alert: PrometheusDown
+        expr: up{job="prometheus"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: monitoring
+        annotations:
+          summary: 'Prometheus is down'
+          description: 'Prometheus has been down for more than 2 minutes. Monitoring and alerting are compromised.'
+
+      - alert: TooManyAlerts
+        expr: count by (instance) (ALERTS{alertstate="firing"}) > 20
+        for: 5m
+        labels:
+          severity: warning
+          service: monitoring
+        annotations:
+          summary: 'Too many alerts firing'
+          description: 'More than 20 alerts are firing on {{ $labels.instance }}. This may indicate a systematic issue.'

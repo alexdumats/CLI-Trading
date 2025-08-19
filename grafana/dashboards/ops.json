@@ -8,32 +8,70 @@
   "panels": [
     {
       "type": "stat",
-      "title": "Stream Pending (All)",
-      "gridPos": { "x": 0, "y": 0, "w": 8, "h": 6 },
+      "title": "Integrations Broker Up",
+      "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+      "targets": [
+        { "expr": "max(up{instance=\"integrations-broker:7010\"})", "legendFormat": "up" }
+      ],
+      "options": { "reduceOptions": { "calcs": ["last"] }, "colorMode": "value" }
+    },
+    {
+      "type": "stat",
+      "title": "Integration Events (total)",
+      "gridPos": { "x": 4, "y": 0, "w": 6, "h": 4 },
+      "targets": [{ "expr": "sum(integration_events_total)", "legendFormat": "total" }],
+      "options": {
+        "reduceOptions": { "calcs": ["last"] },
+        "colorMode": "value",
+        "graphMode": "area"
+      }
+    },
+    {
+      "type": "graph",
+      "title": "Integration Events by Result",
+      "gridPos": { "x": 10, "y": 0, "w": 14, "h": 6 },
       "targets": [
         {
-          "expr": "sum(stream_pending_count)",
-          "legendFormat": "pending"
+          "expr": "sum by (result) (rate(integration_events_total[5m]))",
+          "legendFormat": "{{result}}/s"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Notify.events Pending (integrations)",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 6 },
+      "targets": [
+        {
+          "expr": "stream_pending_count{stream=\"notify.events\",group=\"integrations\"}",
+          "legendFormat": "{{stream}}/{{group}}"
         }
       ],
-      "options": { "reduceOptions": { "calcs": ["last"] }, "colorMode": "value", "graphMode": "area" }
+      "options": { "showHeader": true }
+    },
+    {
+      "type": "stat",
+      "title": "Stream Pending (All)",
+      "gridPos": { "x": 0, "y": 0, "w": 8, "h": 6 },
+      "targets": [{ "expr": "sum(stream_pending_count)", "legendFormat": "pending" }],
+      "options": {
+        "reduceOptions": { "calcs": ["last"] },
+        "colorMode": "value",
+        "graphMode": "area"
+      }
     },
     {
       "type": "table",
       "title": "Stream Pending by Stream/Group",
       "gridPos": { "x": 8, "y": 0, "w": 16, "h": 6 },
-      "targets": [
-        { "expr": "stream_pending_count", "legendFormat": "{{stream}}/{{group}}" }
-      ],
+      "targets": [{ "expr": "stream_pending_count", "legendFormat": "{{stream}}/{{group}}" }],
       "options": { "showHeader": true }
     },
     {
       "type": "stat",
       "title": "Services Down",
       "gridPos": { "x": 0, "y": 6, "w": 6, "h": 6 },
-      "targets": [
-        { "expr": "count(max by (instance) (up == 0))", "legendFormat": "down" }
-      ],
+      "targets": [{ "expr": "count(max by (instance) (up == 0))", "legendFormat": "down" }],
       "options": { "reduceOptions": { "calcs": ["last"] } }
     },
     {
@@ -53,8 +91,143 @@
       "title": "CPU & Memory",
       "gridPos": { "x": 16, "y": 6, "w": 8, "h": 6 },
       "targets": [
-        { "expr": "sum by (instance) (process_resident_memory_bytes)", "legendFormat": "mem {{instance}}" },
-        { "expr": "sum by (instance) (process_cpu_seconds_total)", "legendFormat": "cpu {{instance}}" }
+        {
+          "expr": "sum by (instance) (process_resident_memory_bytes)",
+          "legendFormat": "mem {{instance}}"
+        },
+        {
+          "expr": "sum by (instance) (process_cpu_seconds_total)",
+          "legendFormat": "cpu {{instance}}"
+        }
+      ]
+    },
+
+    /* Redis panels */
+    {
+      "type": "stat",
+      "title": "Redis Up",
+      "gridPos": { "x": 0, "y": 12, "w": 4, "h": 5 },
+      "targets": [{ "expr": "max(up{job=\"redis_exporter\"})", "legendFormat": "up" }],
+      "options": { "reduceOptions": { "calcs": ["last"] }, "colorMode": "value" }
+    },
+    {
+      "type": "stat",
+      "title": "Redis Connected Clients",
+      "gridPos": { "x": 4, "y": 12, "w": 4, "h": 5 },
+      "targets": [{ "expr": "max(redis_connected_clients)", "legendFormat": "clients" }],
+      "options": { "reduceOptions": { "calcs": ["last"] } }
+    },
+    {
+      "type": "graph",
+      "title": "Redis Ops/sec",
+      "gridPos": { "x": 8, "y": 12, "w": 8, "h": 5 },
+      "targets": [
+        { "expr": "sum(rate(redis_commands_processed_total[5m]))", "legendFormat": "ops/s" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Redis Memory Used (bytes)",
+      "gridPos": { "x": 16, "y": 12, "w": 8, "h": 5 },
+      "targets": [{ "expr": "max(redis_memory_used_bytes)", "legendFormat": "mem" }],
+      "options": { "reduceOptions": { "calcs": ["last"] }, "colorMode": "value" }
+    },
+
+    /* Postgres panels */
+    {
+      "type": "stat",
+      "title": "Postgres Up",
+      "gridPos": { "x": 0, "y": 17, "w": 4, "h": 5 },
+      "targets": [{ "expr": "max(up{job=\"postgres_exporter\"})", "legendFormat": "up" }],
+      "options": { "reduceOptions": { "calcs": ["last"] }, "colorMode": "value" }
+    },
+    {
+      "type": "stat",
+      "title": "Postgres Connections",
+      "gridPos": { "x": 4, "y": 17, "w": 8, "h": 5 },
+      "targets": [{ "expr": "sum(pg_stat_database_numbackends)", "legendFormat": "connections" }],
+      "options": { "reduceOptions": { "calcs": ["last"] } }
+    },
+    {
+      "type": "graph",
+      "title": "Postgres TPS",
+      "gridPos": { "x": 12, "y": 17, "w": 12, "h": 5 },
+      "targets": [
+        {
+          "expr": "sum(rate(pg_stat_database_xact_commit_total[5m]) + rate(pg_stat_database_xact_rollback_total[5m]))",
+          "legendFormat": "tps"
+        }
+      ]
+    },
+    {
+      "type": "gauge",
+      "title": "Postgres Cache Hit Ratio",
+      "gridPos": { "x": 0, "y": 22, "w": 8, "h": 5 },
+      "targets": [
+        {
+          "expr": "(sum(rate(pg_stat_database_blks_hit_total[5m])) / (sum(rate(pg_stat_database_blks_hit_total[5m])) + sum(rate(pg_stat_database_blks_read_total[5m]))))",
+          "legendFormat": "ratio"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["last"] }, "min": 0, "max": 1 }
+    },
+    {
+      "type": "logs",
+      "title": "Integrations Broker Errors (Loki)",
+      "gridPos": { "x": 0, "y": 27, "w": 24, "h": 8 },
+      "datasource": "Loki",
+      "targets": [
+        {
+          "expr": "{job=\"docker\",service=\"Claude Integrations Broker\",level=\"error\"}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "showTime": true,
+        "wrapLogMessage": true
+      }
+    },
+    {
+      "type": "graph",
+      "title": "Optimizer Jobs by Status (rate)",
+      "gridPos": { "x": 0, "y": 35, "w": 12, "h": 6 },
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(optimizer_jobs_total[5m]))",
+          "legendFormat": "{{status}}/s"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "opt.requests Pending (optimizer)",
+      "gridPos": { "x": 12, "y": 35, "w": 12, "h": 6 },
+      "targets": [
+        {
+          "expr": "stream_pending_count{stream=\"opt.requests\",group=\"optimizer\"}",
+          "legendFormat": "{{stream}}/{{group}}"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["last"] }, "colorMode": "value" }
+    },
+    {
+      "type": "stat",
+      "title": "Active Min Confidence",
+      "gridPos": { "x": 0, "y": 41, "w": 6, "h": 4 },
+      "targets": [{ "expr": "optimizer_active_min_confidence", "legendFormat": "minConfidence" }],
+      "options": { "reduceOptions": { "calcs": ["last"] }, "colorMode": "value" }
+    },
+    {
+      "type": "graph",
+      "title": "Risk Evaluations by Result/Reason",
+      "gridPos": { "x": 6, "y": 41, "w": 18, "h": 6 },
+      "targets": [
+        {
+          "expr": "sum by (result,reason) (rate(risk_evaluations_total[5m]))",
+          "legendFormat": "{{result}}/{{reason}}/s"
+        }
       ]
     }
   ],
@@ -65,5 +238,5 @@
   "time": { "from": "now-6h", "to": "now" },
   "timezone": "",
   "title": "Ops: Streams & Services",
-  "version": 1
+  "version": 2
 }

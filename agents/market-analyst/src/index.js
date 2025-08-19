@@ -18,7 +18,7 @@ sub.on('error', (err) => console.error(`[${SERVICE_NAME}] Redis sub error:`, err
 // Channels
 const CHANNELS = {
   ORCH_CMDS: 'orchestrator.commands',
-  ANALYSIS_SIGNALS: 'analysis.signals'
+  ANALYSIS_SIGNALS: 'analysis.signals',
 };
 
 const app = express();
@@ -34,10 +34,14 @@ const httpRequestDuration = new client.Histogram({
   name: 'http_request_duration_seconds',
   help: 'Duration of HTTP requests in seconds',
   labelNames: ['method', 'path', 'status'],
-  buckets: [0.05, 0.1, 0.3, 0.5, 1, 2, 5]
+  buckets: [0.05, 0.1, 0.3, 0.5, 1, 2, 5],
 });
 register.registerMetric(httpRequestDuration);
-const streamPendingGauge = new client.Gauge({ name: 'stream_pending_count', help: 'Pending messages in Redis Streams', labelNames: ['stream','group'] });
+const streamPendingGauge = new client.Gauge({
+  name: 'stream_pending_count',
+  help: 'Pending messages in Redis Streams',
+  labelNames: ['stream', 'group'],
+});
 register.registerMetric(streamPendingGauge);
 
 // Timing middleware
@@ -51,12 +55,19 @@ app.use((req, res, next) => {
 app.get('/health', async (req, res) => {
   let redisStatus = 'unknown';
   try {
-    await pub.ping(); await sub.ping();
+    await pub.ping();
+    await sub.ping();
     redisStatus = 'ok';
   } catch (e) {
     redisStatus = 'error';
   }
-  res.json({ status: 'ok', service: SERVICE_NAME, redis: redisStatus, uptime: process.uptime(), ts: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    service: SERVICE_NAME,
+    redis: redisStatus,
+    uptime: process.uptime(),
+    ts: new Date().toISOString(),
+  });
 });
 
 // Metrics
@@ -65,8 +76,30 @@ app.get('/metrics', async (req, res) => {
   res.end(await register.metrics());
 });
 
+// Standardized status
+app.get('/status', async (req, res) => {
+  let redisStatus = 'unknown';
+  try {
+    await pub.ping();
+    await sub.ping();
+    redisStatus = 'ok';
+  } catch {
+    redisStatus = 'error';
+  }
+  res.json({
+    status: 'ok',
+    service: SERVICE_NAME,
+    role: 'market-analyst',
+    version: process.env.npm_package_version || '0.0.0',
+    uptime: process.uptime(),
+    deps: { redis: redisStatus },
+  });
+});
+
 // REST endpoints
-app.post('/analysis/ingest', (req, res) => res.status(202).json({ status: 'accepted', items: (req.body && req.body.length) || 0 }));
+app.post('/analysis/ingest', (req, res) =>
+  res.status(202).json({ status: 'accepted', items: (req.body && req.body.length) || 0 })
+);
 app.get('/analysis/signal', (req, res) => res.json({ signal: 'hold', confidence: 0.0 }));
 app.post('/analysis/analyze', (req, res) => {
   const symbol = (req.body && req.body.symbol) || 'BTC-USD';
@@ -79,27 +112,43 @@ app.post('/analysis/analyze', (req, res) => {
 
 // Subscribe to orchestrator commands and publish signals (Streams)
 await (async () => {
-  startPendingMonitor({ redis: sub, stream: CHANNELS.ORCH_CMDS, group: 'analyst', onCount: (c)=> streamPendingGauge.set({stream: CHANNELS.ORCH_CMDS, group: 'analyst'}, c) });
+  startPendingMonitor({
+    redis: sub,
+    stream: CHANNELS.ORCH_CMDS,
+    group: 'analyst',
+    onCount: (c) => streamPendingGauge.set({ stream: CHANNELS.ORCH_CMDS, group: 'analyst' }, c),
+  });
   startConsumer({
     redis: sub,
     stream: CHANNELS.ORCH_CMDS,
     group: 'analyst',
     logger,
-    idempotency: { redis: sub, keyFn: (p)=>p.requestId, ttlSeconds: 86400 },
+    idempotency: { redis: sub, keyFn: (p) => p.requestId, ttlSeconds: 86400 },
     dlqStream: `${CHANNELS.ORCH_CMDS}.dlq`,
     maxFailures: 5,
     handler: async ({ payload: msg }) => {
       if (msg.type === 'analyze' && msg.symbol) {
         const confidence = 0.7;
         const side = 'buy';
-        const signal = { requestId: msg.requestId, symbol: msg.symbol, side, confidence, traceId: msg.traceId, ts: new Date().toISOString() };
+        const signal = {
+          requestId: msg.requestId,
+          symbol: msg.symbol,
+          side,
+          confidence,
+          traceId: msg.traceId,
+          ts: new Date().toISOString(),
+        };
         await xaddJSON(pub, CHANNELS.ANALYSIS_SIGNALS, signal);
       }
-    }
+    },
   });
 })();
 
 // 404
+// Standardized stubs
+app.post('/execute', (req, res) => res.status(501).json({ error: 'not_implemented' }));
+app.post('/optimize', (req, res) => res.status(501).json({ error: 'not_implemented' }));
+
 app.use((req, res) => {
   res.status(404).json({ error: 'not_found', path: req.path });
 });
@@ -111,8 +160,12 @@ const server = app.listen(PORT, () => {
 const shutdown = async () => {
   logger.info('shutting_down');
   server.close(() => logger.info('server_closed'));
-  try { await sub.quit(); } catch {}
-  try { await pub.quit(); } catch {}
+  try {
+    await sub.quit();
+  } catch {}
+  try {
+    await pub.quit();
+  } catch {}
   process.exit(0);
 };
 process.on('SIGINT', shutdown);
